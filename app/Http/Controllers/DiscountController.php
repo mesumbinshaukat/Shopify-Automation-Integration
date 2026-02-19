@@ -87,7 +87,6 @@ class DiscountController extends Controller
             if ($targetType === 'all') {
                 $isEligible = true;
             } elseif ($targetType === 'products') {
-                // Check if product ID matches (coerce both to string/numeric for safety)
                 $cleanProdId = (string)str_replace('gid://shopify/Product/', '', $productId);
                 foreach ($targetIds as $tid) {
                     $cleanTid = (string)str_replace('gid://shopify/Product/', '', $tid);
@@ -99,9 +98,18 @@ class DiscountController extends Controller
             } elseif ($targetType === 'collections') {
                 $isEligible = $this->checkCollectionMembership($shop, $productId, $targetIds);
             }
+
+            // Log the check as requested by the user
+            Log::info("DiscountController: Eligibility check result.", [
+                'customer_id' => $customerId,
+                'product_id' => $productId,
+                'target_type' => $targetType,
+                'target_count' => count($targetIds),
+                'is_eligible' => $isEligible
+            ]);
+
         } catch (\Exception $e) {
             Log::error("DiscountController: Eligibility check failed for customer {$customerId} on product {$productId}: " . $e->getMessage());
-            // Fallback to false on error to be safe
         }
 
         return response()->json([
