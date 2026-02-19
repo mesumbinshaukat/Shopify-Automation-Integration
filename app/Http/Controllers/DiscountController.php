@@ -83,11 +83,14 @@ class DiscountController extends Controller
         // 3. Eligibility Check
         $isEligible = false;
 
+        Log::info("DiscountController: Starting check for Customer: $customerId, Product: $productId, Type: $targetType");
+
         try {
             if ($targetType === 'all') {
                 $isEligible = true;
             } elseif ($targetType === 'products') {
                 $cleanProdId = (string)str_replace('gid://shopify/Product/', '', $productId);
+                Log::info("DiscountController: Comparing Product ID $cleanProdId against: " . json_encode($targetIds));
                 foreach ($targetIds as $tid) {
                     $cleanTid = (string)str_replace('gid://shopify/Product/', '', $tid);
                     if ($cleanProdId === $cleanTid) {
@@ -110,6 +113,11 @@ class DiscountController extends Controller
 
         } catch (\Exception $e) {
             Log::error("DiscountController: Eligibility check failed for customer {$customerId} on product {$productId}: " . $e->getMessage());
+        }
+
+        // Final safety: if for some reason percentage is 0, always return ineligible
+        if ($percentage <= 0) {
+            $isEligible = false;
         }
 
         return response()->json([
