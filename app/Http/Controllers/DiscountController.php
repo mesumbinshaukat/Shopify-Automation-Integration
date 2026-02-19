@@ -83,45 +83,57 @@ class DiscountController extends Controller
         // 3. Eligibility Check
         $isEligible = false;
 
-        Log::info("DiscountController: Starting check for Customer: $customerId, Product: $productId, Type: $targetType");
-
         try {
-            if ($targetType === 'all') {
-                $isEligible = true;
-            } elseif ($targetType === 'products') {
-                $cleanProdId = (string)str_replace('gid://shopify/Product/', '', $productId);
-                Log::info("DiscountController: Comparing Product ID $cleanProdId against: " . json_encode($targetIds));
-                foreach ($targetIds as $tid) {
-                    $cleanTid = (string)str_replace('gid://shopify/Product/', '', $tid);
-                    if ($cleanProdId === $cleanTid) {
-                        $isEligible = true;
-                        break;
+            Log::info("Checking eligibility for customer {$customerId} on product {$productId}. Target Type: {$targetType}");
+
+            if ($percentage <= 0) {
+                $isEligible = false;
+                Log::info("No percentage assigned to customer → ineligible");
+            } else {
+                if ($targetType === 'all') {
+                    $isEligible = true;
+                    Log::info("Customer has 'all' products discount → eligible");
+                } elseif ($targetType === 'products') {
+                    $cleanProdId = (string)str_replace('gid://shopify/Product/', '', $productId);
+                    foreach ($targetIds as $tid) {
+                        $cleanTid = (string)str_replace('gid://shopify/Product/', '', $tid);
+                        if ($cleanProdId === $cleanTid) {
+                            $isEligible = true;
+                            break;
+                        }
                     }
+                    if ($isEligible) {
+                        Log::info("Product {$productId} is in specific assigned products list → eligible for {$percentage}%");
+                    } else {
+                        Log::info("Product {$productId} NOT in assigned products list → ineligible");
+                    }
+                } elseif ($targetType === 'collections') {
+                    // Force strict check: only eligible if product matches target collections
+                    $isEligible = $this->checkCollectionMembership($shop, $productId, $targetIds);
+
+                    if ($isEligible) {
+                        Log::info("Product {$productId} is in target collections → eligible for {$percentage}%");
+                    } else {
+                        Log::info("Product {$productId} NOT in target collections → ineligible");
+                    }
+                } else {
+                    Log::warning("Unknown target type '{$targetType}' for customer {$customerId} → defaulting to ineligible");
+                    $isEligible = false;
                 }
-            } elseif ($targetType === 'collections') {
-                $isEligible = $this->checkCollectionMembership($shop, $productId, $targetIds);
             }
 
-            // Log the check as requested by the user
-            Log::info("DiscountController: Eligibility check result.", [
-                'customer_id' => $customerId,
-                'product_id' => $productId,
-                'target_type' => $targetType,
-                'target_count' => count($targetIds),
-                'is_eligible' => $isEligible
-            ]);
-
         } catch (\Exception $e) {
-            Log::error("DiscountController: Eligibility check failed for customer {$customerId} on product {$productId}: " . $e->getMessage());
+            Log::error("Eligibility check failed for customer {$customerId} on product {$productId}: " . $e->getMessage());
+            $isEligible = false;  // Fail-safe: deny discount on error
         }
 
-        // Final safety: if for some reason percentage is 0, always return ineligible
-        if ($percentage <= 0) {
-            $isEligible = false;
+        // Safety net: never give discount if not explicitly eligible
+        if (!$isEligible) {
+            $percentage = 0;
         }
 
         return response()->json([
-            'percent'  => $isEligible ? $percentage : 0,
+            'percent'  => $percentage,
             'eligible' => $isEligible
         ]);
     }
