@@ -1,0 +1,30 @@
+{% if customer.metafields.custom_pricing.tier %}
+  <div class="custom-pricing-badge" style="background: #eef2ff; color: #4f46e5; padding: 10px; border-radius: 5px; margin-bottom: 15px; font-weight: bold;">
+    🎉 You are a <strong>{{ customer.metafields.custom_pricing.tier }}</strong> member! 
+    Your discounts will be applied automatically at checkout.
+  </div>
+  
+  <script>
+    window.customPricing = {
+      tier: "{{ customer.metafields.custom_pricing.tier }}",
+      discountValue: {{ customer.metafields.custom_pricing.discount_value | default: 0 }},
+      discountType: "{{ customer.metafields.custom_pricing.discount_type | default: 'percentage' }}"
+    };
+
+    document.addEventListener("DOMContentLoaded", function() {
+      const priceElements = document.querySelectorAll('.price, .product__price, .product-single__price');
+      priceElements.forEach(el => {
+        let originalPrice = parseFloat(el.innerText.replace(/[^0-9.-]+/g,""));
+        if (!isNaN(originalPrice)) {
+          let newPrice = originalPrice;
+          if (window.customPricing.discountType === 'percentage') {
+            newPrice = originalPrice * (1 - (window.customPricing.discountValue / 100));
+          } else {
+            newPrice = originalPrice - window.customPricing.discountValue;
+          }
+          el.innerHTML = `<span style="text-decoration: line-through; opacity: 0.5;">${el.innerText}</span> <span style="color: #4f46e5;">$${newPrice.toFixed(2)}</span>`;
+        }
+      });
+    });
+  </script>
+{% endif %}
