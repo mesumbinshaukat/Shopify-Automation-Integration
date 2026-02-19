@@ -24,23 +24,46 @@ class DiscountController extends Controller
         }
 
         // Debug: Log all incoming parameters to investigate shop name and signature issues
-        Log::info("DiscountController: Request from shop: $shop. Parameters: " . json_encode($request->all()));
+        Log::info("DiscountController: Request from shop: $shop. All query params: " . json_encode($request->query()));
 
-        // 1. Security Check: Verify Shopify Request Signature (HMAC) for App Proxy
+        // 1. Security Check: Verify Shopify App Proxy Signature
+        // Shopify App Proxy signs requests with a 'signature' param using HMAC-SHA256.
+        // The message is: sorted key=value pairs concatenated WITHOUT separators, WITHOUT URL-encoding.
         if (config('app.env') === 'production') {
             $queryParams = $request->query();
             $signature = $queryParams['signature'] ?? '';
             
+            if (empty($signature)) {
+                Log::error("DiscountController: Missing signature parameter for shop $shop");
+                return response()->json(['error' => 'Missing signature'], 401);
+            }
+
             unset($queryParams['signature']);
             ksort($queryParams);
             
-            $queryString = http_build_query($queryParams);
-            $calculatedHmac = hash_hmac('sha256', $queryString, config('app.shopify_api_secret') ?: env('SHOPIFY_API_SECRET'));
+            // Build message: concatenate key=value pairs with NO separator, NO URL-encoding
+            // Handle array params (e.g. extra[]=1&extra[]=2) by flattening
+            $messageParts = [];
+            foreach ($queryParams as $key => $value) {
+                if (is_array($value)) {
+                    foreach ($value as $v) {
+                        $messageParts[] = "{$key}={$v}";
+                    }
+                } else {
+                    $messageParts[] = "{$key}={$value}";
+                }
+            }
+            sort($messageParts); // lexicographic sort on the full "key=value" strings
+            $message = implode('', $messageParts); // NO separator
+            
+            $calculatedHmac = hash_hmac('sha256', $message, env('SHOPIFY_API_SECRET'));
 
             if (!hash_equals($calculatedHmac, $signature)) {
-                Log::error("DiscountController: Invalid HMAC signature for shop $shop. Expected: $calculatedHmac, Received: $signature");
+                Log::error("DiscountController: HMAC mismatch for shop $shop. Message: '$message'. Calculated: $calculatedHmac, Received: $signature");
                 return response()->json(['error' => 'Invalid signature'], 401);
             }
+            
+            Log::info("DiscountController: Signature verified successfully for shop $shop");
         }
 
         // 2. Lookup Customer
