@@ -29,6 +29,8 @@ $router->group(['prefix' => 'api'], function ($router) {
         $router->delete('/{id}', 'CustomerController@destroy');
         $router->put('/{id}/discount', 'CustomerController@updateDiscount');
         $router->post('/{id}/send-credentials', 'CustomerController@sendCredentials');
+        $router->post('/save-details', 'CustomerController@saveDetails');
+        $router->get('/{id}/details', 'CustomerController@getDetails');
     });
 
     // Products
@@ -49,4 +51,7 @@ $router->group(['prefix' => 'api'], function ($router) {
 
     // Discount Lookup (for storefront/liquid)
     $router->get('/get-discount', 'DiscountController@getDiscount');
+
+    // Webhooks
+    $router->post('/webhooks/customer-update', 'WebhookController@handleCustomerUpdate');
 });

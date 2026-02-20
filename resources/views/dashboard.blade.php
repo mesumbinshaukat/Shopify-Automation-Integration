@@ -53,6 +53,7 @@
             const [editingData, setEditingData] = useState(null);
             
             const [isManagingDiscount, setIsManagingDiscount] = useState(null); // customer object
+            const [isViewingDetails, setIsViewingDetails] = useState(null); // detail object
             const [selectedTargets, setSelectedTargets] = useState([]); // Array of IDs
             const [targetType, setTargetType] = useState('all');
             
@@ -426,6 +427,15 @@
                                                 </td>
                                                 <td className="py-5 px-4 text-right space-x-4">
                                                     <button onClick={() => handleSendCredentials(customer.id)} className="text-indigo-500 hover:text-indigo-700 text-xs font-bold uppercase">🔑 Invite</button>
+                                                    <button onClick={async () => {
+                                                        const res = await fetch(`/api/customers/${customer.id}/details`);
+                                                        const data = await res.json();
+                                                        if (data) {
+                                                            setIsViewingDetails(data);
+                                                        } else {
+                                                            showToast("No additional details found for this customer.", "info");
+                                                        }
+                                                    }} className="text-blue-500 hover:text-blue-700 text-xs font-bold uppercase">📋 Info</button>
                                                     <button onClick={() => { setIsEditingEntity('customer'); setEditingData(customer); }} className="text-gray-400 hover:text-indigo-600 text-xs font-bold uppercase">Edit</button>
                                                     <button onClick={() => handleDeleteEntity('customer', customer.id)} className="text-gray-300 hover:text-red-500 text-xs font-bold uppercase transition">Delete</button>
                                                 </td>
@@ -433,6 +443,43 @@
                                         ))}
                                     </tbody>
                                 </table>
+                            </div>
+                        )}
+
+                        {/* Viewing Details Modal */}
+                        {isViewingDetails && (
+                            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                                <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+                                    <div className="flex justify-between items-center mb-6">
+                                        <h3 className="text-xl font-bold text-gray-800">Additional Information</h3>
+                                        <button onClick={() => setIsViewingDetails(null)} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
+                                        {[
+                                            { label: 'Company Name', key: 'company_name' },
+                                            { label: 'Physician Name', key: 'physician_name' },
+                                            { label: 'NPI #', key: 'npi' },
+                                            { label: 'Contact Name', key: 'contact_name' },
+                                            { label: 'Contact Email', key: 'contact_email' },
+                                            { label: 'Contact Phone', key: 'contact_phone_number' },
+                                            { label: 'Sales Rep', key: 'sales_rep' },
+                                            { label: 'PO #', key: 'po' },
+                                            { label: 'Department', key: 'department' },
+                                        ].map(field => (
+                                            <div key={field.key} className="border-b pb-2">
+                                                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">{field.label}</label>
+                                                <p className="text-gray-800 font-medium">{isViewingDetails[field.key] || 'N/A'}</p>
+                                            </div>
+                                        ))}
+                                        <div className="col-span-2 border-b pb-2">
+                                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Message</label>
+                                            <p className="text-gray-800 font-medium whitespace-pre-wrap">{isViewingDetails['message'] || 'No message provided'}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end mt-8">
+                                        <button onClick={() => setIsViewingDetails(null)} className="bg-gray-100 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-200 transition font-semibold">Close</button>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
