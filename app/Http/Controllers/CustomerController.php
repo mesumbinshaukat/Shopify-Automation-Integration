@@ -40,12 +40,12 @@ class CustomerController extends Controller
             try {
                 $sCust->save();
             } catch (\Exception $e) {
-                // Creation usually succeeds even if the SDK throws a minor network exception
+                \Illuminate\Support\Facades\Log::warning("Shopify Customer Save Exception for {$request->email}: " . $e->getMessage());
             }
 
             // 2. Optimistic Sync: If we don't have the ID immediately, try a quick fetch
             if (!$sCust->id) {
-                $recent = ShopifyCustomer::all($session, ['limit' => 5]);
+                $recent = ShopifyCustomer::all($session, ['limit' => 10]);
                 foreach ($recent as $candidate) {
                     if (strtolower($candidate->email) === strtolower($request->email)) {
                         $sCust = $candidate;
@@ -54,11 +54,16 @@ class CustomerController extends Controller
                 }
             }
 
+            // CRITICAL: Prevent Duplicate Entry '0' by ensuring we have a valid Shopify ID
+            if (!$sCust->id) {
+                throw new \Exception("Shopify ID could not be retrieved for {$request->email}. Registration aborted to prevent database corruption.");
+            }
+
             // 3. Create or Update Local Record - USES EMAIL AS KEY for merging
             $customer = Customer::updateOrCreate(
                 ['email' => $request->email],
                 [
-                    'shopify_id' => $sCust->id ?? 0,
+                    'shopify_id' => $sCust->id,
                     'first_name' => $sCust->first_name ?? $request->first_name,
                     'last_name' => $sCust->last_name ?? $request->last_name,
                 ]
