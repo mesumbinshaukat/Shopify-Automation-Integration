@@ -12,6 +12,23 @@
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, "Helvetica Neue", sans-serif; background-color: #f6f6f7; }
         .polaris-card { background: white; border-radius: 8px; box-shadow: 0 0 0 1px rgba(63, 63, 68, 0.05), 0 1px 3px 0 rgba(63, 63, 68, 0.15); padding: 20px; }
+        
+        @keyframes bounce-short {
+            0%, 20%, 50%, 80%, 100% {transform: translateY(0);}
+            40% {transform: translateY(-5px);}
+            60% {transform: translateY(-3px);}
+        }
+        .animate-bounce-short {
+            animation: bounce-short 0.5s ease;
+        }
+        
+        @keyframes fade-in-right {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        .animate-fade-in {
+            animation: fade-in-right 0.3s ease-out;
+        }
     </style>
 </head>
 <body class="p-8">
@@ -26,6 +43,7 @@
             const [products, setProducts] = useState([]);
             const [collections, setCollections] = useState([]);
             const [loading, setLoading] = useState(true);
+            const [toasts, setToasts] = useState([]);
             
             // Modals & State
             const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
@@ -44,6 +62,14 @@
                 fetchAllData();
             }, []);
 
+            const showToast = (message, type = 'success') => {
+                const id = Date.now();
+                setToasts(prev => [...prev, { id, message, type }]);
+                setTimeout(() => {
+                    setToasts(prev => prev.filter(t => t.id !== id));
+                }, 5000);
+            };
+
             const fetchAllData = async () => {
                 setLoading(true);
                 try {
@@ -56,7 +82,7 @@
                     setProducts(await prodRes.json());
                     setCollections(await collRes.json());
                 } catch (error) {
-                    console.error("Failed to fetch data:", error);
+                    showToast("Failed to fetch data: " + error.message, 'error');
                 } finally {
                     setLoading(false);
                 }
@@ -68,10 +94,10 @@
                     const response = await fetch(`/api/${type}/sync?shop=${shop}`, { method: 'POST' });
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.error || 'Sync failed');
-                    alert(`${type.charAt(0).toUpperCase() + type.slice(1)} sync completed!`);
+                    showToast(`${type.charAt(0).toUpperCase() + type.slice(1)} sync completed!`);
                     fetchAllData();
                 } catch (error) {
-                    alert(error.message);
+                    showToast(error.message, 'error');
                     setLoading(false);
                 }
             };
@@ -86,13 +112,28 @@
                     if (body) options.body = JSON.stringify({ ...body, shop });
                     
                     const res = await fetch(url, options);
+                    
+                    // Handle non-OK responses
                     if (!res.ok) {
-                        const data = await res.json();
-                        throw new Error(data.error || 'Operation failed');
+                        let errorMessage = 'Operation failed';
+                        try {
+                            const data = await res.json();
+                            errorMessage = data.error || errorMessage;
+                        } catch (e) {
+                            // If not JSON, use status text
+                            errorMessage = res.statusText || errorMessage;
+                        }
+                        throw new Error(errorMessage);
                     }
+
+                    // For 204 No Content or empty responses, return a success flag instead of parsing JSON
+                    if (res.status === 204 || res.headers.get('content-length') === '0') {
+                        return { success: true };
+                    }
+
                     return await res.json();
                 } catch (error) {
-                    alert(error.message);
+                    showToast(error.message, 'error');
                     return null;
                 } finally {
                     setLoading(false);
@@ -103,7 +144,7 @@
                 e.preventDefault();
                 const res = await handleRequest('/api/customers', 'POST', newCustomer);
                 if (res) {
-                    alert("Customer created successfully!");
+                    showToast("Customer created successfully!");
                     setNewCustomer({ first_name: '', last_name: '', email: '' });
                     setIsCreatingCustomer(false);
                     fetchAllData();
@@ -115,6 +156,7 @@
                 const endpoint = `/api/${isEditingEntity}s/${editingData.id}`;
                 const res = await handleRequest(endpoint, 'PUT', editingData);
                 if (res) {
+                    showToast("Changes saved successfully!");
                     setIsEditingEntity(null);
                     setEditingData(null);
                     fetchAllData();
@@ -123,7 +165,8 @@
 
             const handleDeleteEntity = async (type, id) => {
                 if(confirm(`Are you sure you want to delete this ${type}? This will also delete it from Shopify.`)) {
-                    await handleRequest(`/api/${type}s/${id}?shop=${shop}`, 'DELETE');
+                    const res = await handleRequest(`/api/${type}s/${id}?shop=${shop}`, 'DELETE');
+                    if (res !== null) showToast(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted.`);
                     fetchAllData();
                 }
             };
@@ -141,20 +184,34 @@
                     discount_target_ids: selectedTargets
                 });
                 if (res) {
+                    showToast("Discount settings synced to Shopify!");
                     setIsManagingDiscount(null);
                     fetchAllData();
                 }
             };
 
             const handleSendCredentials = async (customerId) => {
-                if(confirm("Send login details to this customer?")) {
-                    await handleRequest(`/api/customers/${customerId}/send-credentials`, 'POST');
-                    alert("Credentials sent!");
+                const res = await handleRequest(`/api/customers/${customerId}/send-credentials`, 'POST');
+                if (res) {
+                    showToast("Credentials sent successfully!");
                 }
             };
 
             return (
-                <div className="max-w-6xl mx-auto pb-20">
+                <div className="max-w-6xl mx-auto pb-20 relative">
+                    {/* Toast Notification Container */}
+                    <div className="fixed top-8 right-8 z-[100] space-y-3 w-80">
+                        {toasts.map(toast => (
+                            <div key={toast.id} className={`p-4 rounded-xl shadow-2xl flex items-center justify-between transform transition-all animate-fade-in animate-bounce-short ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
+                                <div className="flex items-center">
+                                    <span className="mr-3 text-lg">{toast.type === 'error' ? '❌' : '✅'}</span>
+                                    <p className="text-sm font-bold">{toast.message}</p>
+                                </div>
+                                <button onClick={() => setToasts(toasts.filter(t => t.id !== toast.id))} className="ml-4 opacity-75 hover:opacity-100 font-bold">×</button>
+                            </div>
+                        ))}
+                    </div>
+
                     <header className="flex justify-between items-center mb-8">
                         <div>
                             <h1 className="text-2xl font-bold text-gray-800">Shopify Integration Hub</h1>

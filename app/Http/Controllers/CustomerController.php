@@ -151,7 +151,7 @@ class CustomerController extends Controller
         }
 
         $customer->delete();
-        return response()->json(null, 204);
+        return response()->json(['success' => true, 'message' => 'Customer deleted locally and from Shopify.']);
     }
 
     public function sync(Request $request)

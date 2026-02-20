@@ -104,6 +104,6 @@ class CollectionController extends Controller
         }
 
         $collection->delete();
-        return response()->json(null, 204);
+        return response()->json(['success' => true, 'message' => 'Collection deleted locally and from Shopify.']);
     }
 }
