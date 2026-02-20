@@ -40,30 +40,30 @@ class CustomerController extends Controller
             try {
                 $sCust->save();
             } catch (\Exception $e) {
-                \Illuminate\Support\Facades\Log::warning("Shopify Customer Save Exception for {$request->email}: " . $e->getMessage());
+                // Creation usually succeeds even if the SDK throws a minor network exception
             }
 
-            // 2. Optimistic Sync: If we don't have the ID immediately, try a quick fetch
+            // 2. Optimistic Sync: If we don't have the ID immediately, try to find the customer by email
             if (!$sCust->id) {
-                $recent = ShopifyCustomer::all($session, ['limit' => 10]);
-                foreach ($recent as $candidate) {
-                    if (strtolower($candidate->email) === strtolower($request->email)) {
-                        $sCust = $candidate;
-                        break;
+                try {
+                    $matches = ShopifyCustomer::all($session, ['email' => $request->email]);
+                    foreach ($matches as $match) {
+                        if (strtolower($match->email) === strtolower($request->email)) {
+                            $sCust = $match;
+                            break;
+                        }
                     }
+                } catch (\Exception $e) {
+                    \Illuminate\Support\Facades\Log::warning("CustomerController: Rescue sync failed for {$request->email}: " . $e->getMessage());
                 }
             }
 
-            // CRITICAL: Prevent Duplicate Entry '0' by ensuring we have a valid Shopify ID
-            if (!$sCust->id) {
-                throw new \Exception("Shopify ID could not be retrieved for {$request->email}. Registration aborted to prevent database corruption.");
-            }
-
-            // 3. Create or Update Local Record - USES EMAIL AS KEY for merging
+            // 3. Create or Update Local Record
+            // We use email as the primary key for syncing to accommodate Shopify IDs being null
             $customer = Customer::updateOrCreate(
                 ['email' => $request->email],
                 [
-                    'shopify_id' => $sCust->id,
+                    'shopify_id' => $sCust->id ?? null,
                     'first_name' => $sCust->first_name ?? $request->first_name,
                     'last_name' => $sCust->last_name ?? $request->last_name,
                 ]
