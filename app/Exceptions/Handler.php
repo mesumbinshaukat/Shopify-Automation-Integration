@@ -49,6 +49,12 @@ class Handler extends ExceptionHandler
      */
     public function render($request, Throwable $exception)
     {
+        if ($exception instanceof ValidationException) {
+            \Illuminate\Support\Facades\Log::error("Validation Error: ", [
+                'errors' => $exception->getResponse()->original,
+                'input' => $request->all()
+            ]);
+        }
         return parent::render($request, $exception);
     }
 }

@@ -254,6 +254,7 @@ class CustomerController extends Controller
 
     public function saveDetails(Request $request)
     {
+        \Illuminate\Support\Facades\Log::info("saveDetails Request Data: ", $request->all());
         $this->validate($request, [
             'customerId' => 'required',
             'shop' => 'required',
