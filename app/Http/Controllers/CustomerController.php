@@ -369,6 +369,18 @@ MUTATION;
             $response = $graphQL->query(['query' => $metaobjectMutation, 'variables' => $variables]);
             $body = $response->getDecodedBody();
 
+            // 1. Handle Top-level GraphQL Errors
+            if (isset($body['errors'])) {
+                \Illuminate\Support\Facades\Log::error("saveDetails: GraphQL Top-level Errors: ", $body['errors']);
+                throw new \Exception("GraphQL Errors: " . json_encode($body['errors']));
+            }
+
+            // 2. Handle missing 'data' key (e.g. unexpected response structure)
+            if (!isset($body['data'])) {
+                \Illuminate\Support\Facades\Log::error("saveDetails: Missing 'data' key in response. Full body: ", $body);
+                throw new \Exception("Unexpected GraphQL response structure. Check logs for details.");
+            }
+
             if (!empty($body['data']['metaobjectCreate']['userErrors'])) {
                 throw new \Exception("Metaobject Error: " . json_encode($body['data']['metaobjectCreate']['userErrors']));
             }
@@ -411,6 +423,16 @@ MUTATION;
 
             $customerResponse = $graphQL->query(['query' => $customerMutation, 'variables' => $customerVariables]);
             $customerBody = $customerResponse->getDecodedBody();
+
+            if (isset($customerBody['errors'])) {
+                \Illuminate\Support\Facades\Log::error("saveDetails: Customer Update GraphQL Errors: ", $customerBody['errors']);
+                throw new \Exception("Customer Update GraphQL Error: " . json_encode($customerBody['errors']));
+            }
+
+            if (!isset($customerBody['data'])) {
+                \Illuminate\Support\Facades\Log::error("saveDetails: Customer Update Missing 'data' key. Full body: ", $customerBody);
+                throw new \Exception("Unexpected response during Customer Update.");
+            }
 
             if (!empty($customerBody['data']['customerUpdate']['userErrors'])) {
                 throw new \Exception("Customer Update Error: " . json_encode($customerBody['data']['customerUpdate']['userErrors']));
