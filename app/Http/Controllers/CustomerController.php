@@ -437,7 +437,24 @@ MUTATION;
 
     public function getDetails($id)
     {
-        $details = CustomerDetail::where('customer_id', $id)->first();
+        // $id here is the Shopify numeric customer ID sent from the storefront
+        $numericId = preg_replace('/[^0-9]/', '', $id);
+
+        // First: try shopify_customer_id (what the frontend sends)
+        $details = CustomerDetail::where('shopify_customer_id', $numericId)->first();
+
+        // Fallback: try the local customers table to resolve the internal id
+        if (!$details) {
+            $localCustomer = Customer::where('shopify_id', $numericId)->first();
+            if ($localCustomer) {
+                $details = CustomerDetail::where('customer_id', $localCustomer->id)->first();
+            }
+        }
+
+        if (!$details) {
+            return response()->json(null, 404);
+        }
+
         return response()->json($details);
     }
 }
