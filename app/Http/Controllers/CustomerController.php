@@ -254,27 +254,73 @@ class CustomerController extends Controller
 
     public function saveDetails(Request $request)
     {
+        // 1. Log incoming data for production debugging
         \Illuminate\Support\Facades\Log::info("saveDetails Request Data: ", $request->all());
 
-        $shop = $request->shop;
-        if ($shop && !str_ends_with($shop, '.myshopify.com')) {
-            // Attempt to resolve the myshopify_domain if only the primary domain is provided
-            $customer = Customer::where('shop', $shop)->first();
-            if ($customer) {
-                $shop = $customer->shop;
-            } else {
-                // Search for any shop that matches this custom domain
-                $customerMatch = Customer::where('shop', 'like', '%' . $shop . '%')->first();
-                if ($customerMatch) {
-                    $shop = $customerMatch->shop;
+        $shop = $request->get('shop');
+        if (!$shop) {
+             return response()->json(['error' => 'Missing shop parameter'], 400);
+        }
+
+        // 2. Security Check: Verify Shopify App Proxy Signature (Matches DiscountController)
+        if (config('app.env') === 'production') {
+            $queryParams = $request->query();
+            $signature = $queryParams['signature'] ?? '';
+            
+            if (empty($signature)) {
+                \Illuminate\Support\Facades\Log::error("saveDetails: Missing signature parameter for shop $shop");
+                return response()->json(['error' => 'Missing signature'], 401);
+            }
+
+            unset($queryParams['signature']);
+            ksort($queryParams);
+            
+            $messageParts = [];
+            foreach ($queryParams as $key => $value) {
+                if (is_array($value)) {
+                    foreach ($value as $v) {
+                        $messageParts[] = "{$key}={$v}";
+                    }
+                } else {
+                    $messageParts[] = "{$key}={$value}";
                 }
             }
-            $request->merge(['shop' => $shop]);
+            sort($messageParts);
+            $message = implode('', $messageParts);
+            
+            $calculatedHmac = hash_hmac('sha256', $message, env('SHOPIFY_API_SECRET'));
+
+            if (!hash_equals($calculatedHmac, $signature)) {
+                \Illuminate\Support\Facades\Log::error("saveDetails: HMAC mismatch for shop $shop. Message: '$message'. Calculated: $calculatedHmac, Received: $signature");
+                return response()->json(['error' => 'Invalid signature'], 401);
+            }
+            
+            \Illuminate\Support\Facades\Log::info("saveDetails: Signature verified successfully for shop $shop");
+        }
+
+        // 3. Resolve the Session
+        $session = \App\Services\ShopifyService::loadSession($shop);
+        
+        // Fallback: If session loading fails, try to fuzzy match the shop name 
+        // (sometimes the primary domain and myshopify domain are confused)
+        if (!$session && !str_contains($shop, '.myshopify.com')) {
+            $customerMatch = Customer::where('shop', 'like', '%' . $shop . '%')->first();
+            if ($customerMatch && $customerMatch->shop !== $shop) {
+                 \Illuminate\Support\Facades\Log::info("saveDetails: Attempting fallback session load for resolved shop: {$customerMatch->shop}");
+                 $session = \App\Services\ShopifyService::loadSession($customerMatch->shop);
+                 if ($session) {
+                     $shop = $customerMatch->shop;
+                 }
+            }
+        }
+
+        if (!$session) {
+            \Illuminate\Support\Facades\Log::error("saveDetails: Failed to load session for $shop");
+            return response()->json(['error' => 'Session expired or not found for ' . $shop], 401);
         }
 
         $this->validate($request, [
             'customerId' => 'required',
-            'shop' => 'required',
             'details' => 'required|array',
             'details.company_name' => 'required',
             'details.physician_name' => 'required',
@@ -284,16 +330,9 @@ class CustomerController extends Controller
             'details.contact_phone_number' => 'required',
         ]);
 
-        $shop = $request->shop;
         $customerId = $request->customerId;
         $details = $request->details;
-
         $numericCustomerId = preg_replace('/[^0-9]/', '', $customerId);
-
-        $session = \App\Services\ShopifyService::loadSession($shop);
-        if (!$session) {
-            return response()->json(['error' => 'Session expired.'], 401);
-        }
 
         try {
             $graphQL = new Graphql($session->getShop(), $session->getAccessToken());

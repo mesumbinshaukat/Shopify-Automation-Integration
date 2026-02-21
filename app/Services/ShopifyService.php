@@ -14,7 +14,16 @@ class ShopifyService
      */
     public static function loadSession(string $shop)
     {
-        // 1. Attempt standard load
+        // 1. Normalize shop name (Ensure it has .myshopify.com and handle common domain quirks)
+        $shop = strtolower(trim($shop));
+        if (!str_ends_with($shop, '.myshopify.com')) {
+            // If it's just a handle, append the domain
+            if (!str_contains($shop, '.')) {
+                $shop .= '.myshopify.com';
+            }
+        }
+
+        // 2. Attempt standard load
         $session = Utils::loadOfflineSession($shop);
         
         if ($session) {
