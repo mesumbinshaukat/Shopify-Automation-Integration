@@ -437,13 +437,17 @@ MUTATION;
 
     public function getDetails($id)
     {
-        // $id here is the Shopify numeric customer ID sent from the storefront
         $numericId = preg_replace('/[^0-9]/', '', $id);
 
-        // First: try shopify_customer_id (what the frontend sends)
-        $details = CustomerDetail::where('shopify_customer_id', $numericId)->first();
+        // Strategy 1: admin app passes the local DB customer_id (e.g. 1, 2, 3)
+        $details = CustomerDetail::where('customer_id', $numericId)->first();
 
-        // Fallback: try the local customers table to resolve the internal id
+        // Strategy 2: storefront passes the Shopify numeric customer ID (e.g. 9827837870356)
+        if (!$details) {
+            $details = CustomerDetail::where('shopify_customer_id', $numericId)->first();
+        }
+
+        // Strategy 3: resolve via the customers table by shopify_id as a last resort
         if (!$details) {
             $localCustomer = Customer::where('shopify_id', $numericId)->first();
             if ($localCustomer) {
@@ -452,7 +456,7 @@ MUTATION;
         }
 
         if (!$details) {
-            return response()->json(null, 404);
+            return response()->json(['message' => 'No details found for this customer.'], 404);
         }
 
         return response()->json($details);

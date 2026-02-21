@@ -442,12 +442,16 @@
                                                     <button onClick={async () => {
                                                         try {
                                                             const res = await fetch(`/api/customers/${customer.id}/details`);
+                                                            if (res.status === 404) {
+                                                                showToast("This customer has not submitted their details yet.", "error");
+                                                                return;
+                                                            }
                                                             if (!res.ok) throw new Error("Server Error " + res.status);
                                                             const data = await res.json();
-                                                            if (data) {
+                                                            if (data && data.id) {
                                                                 setIsViewingDetails(data);
                                                             } else {
-                                                                showToast("No additional details found for this customer.", "info");
+                                                                showToast("No additional details found for this customer.", "error");
                                                             }
                                                         } catch (err) {
                                                             showToast("Failed to fetch details: " + err.message, "error");
