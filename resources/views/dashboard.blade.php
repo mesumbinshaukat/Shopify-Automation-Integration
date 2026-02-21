@@ -79,10 +79,22 @@
                         fetch('/api/products'),
                         fetch('/api/collections')
                     ]);
-                    setCustomers(await custRes.json());
-                    setProducts(await prodRes.json());
-                    setCollections(await collRes.json());
+
+                    if (!custRes.ok || !prodRes.ok || !collRes.ok) {
+                        throw new Error("One or more server requests failed (possibly a controller error).");
+                    }
+
+                    const [custData, prodData, collData] = await Promise.all([
+                        custRes.json(),
+                        prodRes.json(),
+                        collRes.json()
+                    ]);
+
+                    setCustomers(custData);
+                    setProducts(prodData);
+                    setCollections(collData);
                 } catch (error) {
+                    console.error(error);
                     showToast("Failed to fetch data: " + error.message, 'error');
                 } finally {
                     setLoading(false);
@@ -428,12 +440,17 @@
                                                 <td className="py-5 px-4 text-right space-x-4">
                                                     <button onClick={() => handleSendCredentials(customer.id)} className="text-indigo-500 hover:text-indigo-700 text-xs font-bold uppercase">🔑 Invite</button>
                                                     <button onClick={async () => {
-                                                        const res = await fetch(`/api/customers/${customer.id}/details`);
-                                                        const data = await res.json();
-                                                        if (data) {
-                                                            setIsViewingDetails(data);
-                                                        } else {
-                                                            showToast("No additional details found for this customer.", "info");
+                                                        try {
+                                                            const res = await fetch(`/api/customers/${customer.id}/details`);
+                                                            if (!res.ok) throw new Error("Server Error " + res.status);
+                                                            const data = await res.json();
+                                                            if (data) {
+                                                                setIsViewingDetails(data);
+                                                            } else {
+                                                                showToast("No additional details found for this customer.", "info");
+                                                            }
+                                                        } catch (err) {
+                                                            showToast("Failed to fetch details: " + err.message, "error");
                                                         }
                                                     }} className="text-blue-500 hover:text-blue-700 text-xs font-bold uppercase">📋 Info</button>
                                                     <button onClick={() => { setIsEditingEntity('customer'); setEditingData(customer); }} className="text-gray-400 hover:text-indigo-600 text-xs font-bold uppercase">Edit</button>
