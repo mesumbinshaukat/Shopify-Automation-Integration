@@ -255,6 +255,23 @@ class CustomerController extends Controller
     public function saveDetails(Request $request)
     {
         \Illuminate\Support\Facades\Log::info("saveDetails Request Data: ", $request->all());
+
+        $shop = $request->shop;
+        if ($shop && !str_ends_with($shop, '.myshopify.com')) {
+            // Attempt to resolve the myshopify_domain if only the primary domain is provided
+            $customer = Customer::where('shop', $shop)->first();
+            if ($customer) {
+                $shop = $customer->shop;
+            } else {
+                // Search for any shop that matches this custom domain
+                $customerMatch = Customer::where('shop', 'like', '%' . $shop . '%')->first();
+                if ($customerMatch) {
+                    $shop = $customerMatch->shop;
+                }
+            }
+            $request->merge(['shop' => $shop]);
+        }
+
         $this->validate($request, [
             'customerId' => 'required',
             'shop' => 'required',
