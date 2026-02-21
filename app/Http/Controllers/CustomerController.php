@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 
 namespace App\Http\Controllers;
 
@@ -27,7 +27,7 @@ class CustomerController extends Controller
 
         $session = \App\Services\ShopifyService::loadSession($request->shop);
         if (!$session) {
-            return response()->json(['error' => 'Session expired. Please refresh.'], 102220401);
+            return response()->json(['error' => 'Session expired. Please refresh.'], 401);
         }
 
         try {
@@ -61,7 +61,6 @@ class CustomerController extends Controller
             }
 
             // 3. Create or Update Local Record
-            // We use email as the primary key for syncing to accommodate Shopify IDs being null
             $customer = Customer::updateOrCreate(
                 ['email' => $request->email],
                 [
@@ -74,7 +73,6 @@ class CustomerController extends Controller
             return response()->json($customer, 201);
 
         } catch (\Exception $e) {
-            // Only report actual fatal errors (like invalid shop session)
             return response()->json(['error' => 'Creation Issue: ' . $e->getMessage()], 500);
         }
     }
@@ -91,11 +89,9 @@ class CustomerController extends Controller
         $customer = Customer::findOrFail($id);
         $customer->update($request->only('first_name', 'last_name', 'email'));
 
-        // Sync with Shopify
         $session = \App\Services\ShopifyService::loadSession($request->shop);
         if ($session) {
             try {
-                // RESCUE SYNC: If shopify_id is 0, find it first
                 if (!$customer->shopify_id || $customer->shopify_id == 0) {
                     $matches = ShopifyCustomer::all($session, ['email' => $customer->email]);
                     foreach ($matches as $match) {
@@ -128,11 +124,9 @@ class CustomerController extends Controller
         $this->validate($request, ['shop' => 'required']);
         $customer = Customer::findOrFail($id);
         
-        // Optionally delete from Shopify
         $session = \App\Services\ShopifyService::loadSession($request->shop);
         if ($session) {
             try {
-                // RESCUE SYNC: If shopify_id is 0, find it first so we can delete it from Shopify too
                 if (!$customer->shopify_id || $customer->shopify_id == 0) {
                     $matches = ShopifyCustomer::all($session, ['email' => $customer->email]);
                     foreach ($matches as $match) {
@@ -173,12 +167,11 @@ class CustomerController extends Controller
             
             foreach ($customers as $sCust) {
                 Customer::updateOrCreate(
-                    ['email' => $sCust->email], // Use email as unique key for merging
+                    ['email' => $sCust->email],
                     [
                         'shopify_id'   => $sCust->id,
                         'first_name'   => $sCust->first_name,
                         'last_name'    => $sCust->last_name,
-                        // Sync Shopify tags back to local DB (includes special_discount_X% tags)
                         'shopify_tags' => $sCust->tags ?? null,
                     ]
                 );
@@ -207,13 +200,10 @@ class CustomerController extends Controller
         $customer->discount_target_ids = $request->discount_target_ids;
         $customer->save();
 
-        // Sync with Shopify Price Rules
         $session = \App\Services\ShopifyService::loadSession($request->shop);
         if ($session) {
             try {
-                // RESCUE SYNC: If shopify_id is 0, try to find it on Shopify now
                 if (!$customer->shopify_id || $customer->shopify_id == 0) {
-                    \Illuminate\Support\Facades\Log::info("Rescue Sync: Fetching ID for pending customer " . $customer->email);
                     $matches = ShopifyCustomer::all($session, ['email' => $customer->email]);
                     foreach ($matches as $match) {
                         if (strtolower($match->email) === strtolower($customer->email)) {
@@ -235,9 +225,7 @@ class CustomerController extends Controller
                 );
 
                 if ($discountData) {
-                    // Store the robust GraphQL Gid if available, otherwise fallback to the tag-based ID
                     $customer->shopify_discount_id = $discountData['discount_id'] ?? $discountData['price_rule_id'];
-                    // Persist the final Shopify tags string locally so the DB stays in sync
                     if (isset($discountData['tags'])) {
                         $customer->shopify_tags = $discountData['tags'];
                     }
@@ -279,10 +267,9 @@ class CustomerController extends Controller
         ]);
 
         $shop = $request->shop;
-        $customerId = $request->customerId; // This might be long ID or GID
+        $customerId = $request->customerId;
         $details = $request->details;
 
-        // Ensure customerId is just the numeric part if GID passed
         $numericCustomerId = preg_replace('/[^0-9]/', '', $customerId);
 
         $session = \App\Services\ShopifyService::loadSession($shop);
@@ -293,7 +280,6 @@ class CustomerController extends Controller
         try {
             $graphQL = new Graphql($session->getShop(), $session->getAccessToken());
 
-            // 1. Create Metaobject Entry
             $fields = [];
             foreach ($details as $key => $value) {
                 if ($value !== null) {
@@ -332,7 +318,6 @@ MUTATION;
 
             $metaobjectId = $body['data']['metaobjectCreate']['metaobject']['id'];
 
-            // 2. Attach to Customer Metafields
             $customerMutation = <<<'MUTATION'
             mutation customerUpdate($input: CustomerInput!) {
               customerUpdate(input: $input) {
@@ -374,10 +359,8 @@ MUTATION;
                 throw new \Exception("Customer Update Error: " . json_encode($customerBody['data']['customerUpdate']['userErrors']));
             }
 
-            // 3. Sync to Local Database
             $localCustomer = Customer::where('shopify_id', $numericCustomerId)->first();
             if (!$localCustomer) {
-                // Try to find by email if shopify_id is null/0 in our DB
                 $localCustomer = Customer::where('email', $details['contact_email'])->first();
             }
 
@@ -389,8 +372,6 @@ MUTATION;
                         'metaobject_id' => $metaobjectId
                     ])
                 );
-            } else {
-                \Illuminate\Support\Facades\Log::warning("saveDetails: Local customer record not found for ID {$numericCustomerId} or email {$details['contact_email']}");
             }
 
             return response()->json(['success' => true]);
