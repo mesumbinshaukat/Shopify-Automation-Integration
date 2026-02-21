@@ -361,7 +361,7 @@ MUTATION;
 
             $variables = [
                 'metaobject' => [
-                    'definitionHandle' => 'customer_details',
+                    'type' => 'customer_details',
                     'fields' => $fields
                 ]
             ];
