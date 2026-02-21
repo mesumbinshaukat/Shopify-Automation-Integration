@@ -16,6 +16,7 @@
 $router->get('/', ['as' => 'install', 'uses' => 'ShopifyController@install']);
 $router->get('/auth/begin', ['as' => 'begin', 'uses' => 'ShopifyController@begin']);
 $router->get('/auth/callback', ['as' => 'callback', 'uses' => 'ShopifyController@callback']);
+$router->get('/auth/reauth', ['as' => 'reauth', 'uses' => 'ShopifyController@forceReauth']);
 $router->get('/dashboard', ['as' => 'dashboard', 'uses' => 'ShopifyController@dashboard']);
 
 // API Routes

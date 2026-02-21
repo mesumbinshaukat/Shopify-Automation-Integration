@@ -20,6 +20,38 @@ class ShopifyController extends Controller
         return view('breakout', ['installUrl' => $beginUrl]);
     }
 
+    /**
+     * Force re-authentication by deleting stale session and restarting OAuth.
+     * Used when a session exists but is missing newly-requested scopes.
+     * Route: GET /auth/reauth?shop=xxx.myshopify.com
+     */
+    public function forceReauth(Request $request)
+    {
+        $shop = $request->query('shop');
+        if (!$shop) {
+            return response('Missing shop parameter', 400);
+        }
+
+        // Delete the stale offline session file so OAuth issues a fresh token
+        $sessionId = \Shopify\Auth\OAuth::getOfflineSessionId($shop);
+        \Shopify\Context::$SESSION_STORAGE->deleteSession($sessionId);
+        \Illuminate\Support\Facades\Log::info("forceReauth: Deleted stale session for {$shop} (ID: {$sessionId}). Starting fresh OAuth.");
+
+        // Kick off OAuth to get a new token with updated scopes
+        try {
+            $installUrl = \Shopify\Auth\OAuth::begin(
+                $shop,
+                '/auth/callback',
+                false,
+                [$this, 'setShopifyCookie']
+            );
+            return redirect($installUrl);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('forceReauth OAuth begin failed: ' . $e->getMessage());
+            return response('Re-authentication failed: ' . $e->getMessage(), 500);
+        }
+    }
+
     public function begin(Request $request)
     {
         $shop = $request->query('shop');
