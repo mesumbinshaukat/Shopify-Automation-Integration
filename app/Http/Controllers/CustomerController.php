@@ -337,13 +337,19 @@ class CustomerController extends Controller
         try {
             $graphQL = new Graphql($session->getShop(), $session->getAccessToken());
 
+            // Build field list — only include non-null, non-empty values
             $fields = [];
             foreach ($details as $key => $value) {
-                if ($value !== null) {
-                    $fields[] = ['key' => $key, 'value' => (string)$value];
+                if ($value !== null && $value !== '') {
+                    $fields[] = ['key' => $key, 'value' => (string) $value];
                 }
             }
 
+            if (empty($fields)) {
+                return response()->json(['error' => 'No valid detail fields provided.'], 422);
+            }
+
+            // Step 1: Create a Metaobject to store customer details
             $metaobjectMutation = <<<'MUTATION'
             mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) {
               metaobjectCreate(metaobject: $metaobject) {
@@ -369,42 +375,56 @@ MUTATION;
             $response = $graphQL->query(['query' => $metaobjectMutation, 'variables' => $variables]);
             $body = $response->getDecodedBody();
 
-            // 1. Handle Top-level GraphQL Errors
+            // Handle top-level GraphQL errors (e.g. auth, network, malformed query)
             if (isset($body['errors'])) {
                 \Illuminate\Support\Facades\Log::error("saveDetails: GraphQL Top-level Errors: ", $body['errors']);
                 throw new \Exception("GraphQL Errors: " . json_encode($body['errors']));
             }
 
-            // 2. Handle missing 'data' key (e.g. unexpected response structure)
+            // Handle completely missing 'data' key
             if (!isset($body['data'])) {
-                \Illuminate\Support\Facades\Log::error("saveDetails: Missing 'data' key in response. Full body: ", $body);
-                throw new \Exception("Unexpected GraphQL response structure. Check logs for details.");
+                \Illuminate\Support\Facades\Log::error("saveDetails: Missing 'data' key in GraphQL response. Full body: ", $body);
+                throw new \Exception("Unexpected GraphQL response: no data key.");
             }
 
+            // Handle user-level errors (e.g. wrong type name, field validation)
             if (!empty($body['data']['metaobjectCreate']['userErrors'])) {
-                throw new \Exception("Metaobject Error: " . json_encode($body['data']['metaobjectCreate']['userErrors']));
+                $errs = $body['data']['metaobjectCreate']['userErrors'];
+                \Illuminate\Support\Facades\Log::error("saveDetails: Metaobject userErrors: ", $errs);
+                throw new \Exception("Metaobject Error: " . json_encode($errs));
             }
 
-            // --- Skip customer metafield update ---
-            // Shopify requires a pre-existing metafield definition on the Customer resource
-            // which is not created here. Instead we track the metaobject reference locally.
+            // Ensure metaobject was actually created and has an ID
+            $metaobjectId = $body['data']['metaobjectCreate']['metaobject']['id'] ?? null;
+            if (!$metaobjectId) {
+                \Illuminate\Support\Facades\Log::error("saveDetails: Metaobject created but no ID returned. Body: ", $body);
+                throw new \Exception("Metaobject was created but returned no ID.");
+            }
 
+            \Illuminate\Support\Facades\Log::info("saveDetails: Metaobject created successfully. ID: {$metaobjectId}");
+
+            // Step 2: Link to local Customer record
+            // Try by Shopify numeric ID first, then fall back to email
             $localCustomer = Customer::where('shopify_id', $numericCustomerId)->first();
-            if (!$localCustomer) {
+            if (!$localCustomer && isset($details['contact_email'])) {
                 $localCustomer = Customer::where('email', $details['contact_email'])->first();
             }
 
             if ($localCustomer) {
+                // Cast all detail values to strings to avoid type mismatch in DB
+                $detailsForDb = array_map(fn($v) => (string) $v, array_filter($details, fn($v) => $v !== null));
+
                 CustomerDetail::updateOrCreate(
                     ['customer_id' => $localCustomer->id],
-                    array_merge($details, [
-                        'shopify_customer_id' => $numericCustomerId,
-                        'metaobject_id' => $metaobjectId
+                    array_merge($detailsForDb, [
+                        'shopify_customer_id' => (string) $numericCustomerId,
+                        'metaobject_id'       => $metaobjectId
                     ])
                 );
-                \Illuminate\Support\Facades\Log::info("saveDetails: Successfully saved details for customer {$numericCustomerId}. Metaobject ID: {$metaobjectId}");
+                \Illuminate\Support\Facades\Log::info("saveDetails: CustomerDetail record saved for customer_id={$localCustomer->id}, shopify_id={$numericCustomerId}.");
             } else {
-                \Illuminate\Support\Facades\Log::warning("saveDetails: No local customer found for shopify_id={$numericCustomerId}. Details metaobject created ({$metaobjectId}) but not linked locally.");
+                // Non-fatal: metaobject is in Shopify, but we couldn't link it locally
+                \Illuminate\Support\Facades\Log::warning("saveDetails: No local customer found for shopify_id={$numericCustomerId} or email. Metaobject {$metaobjectId} created in Shopify but not linked locally.");
             }
 
             return response()->json(['success' => true]);
