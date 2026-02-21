@@ -385,58 +385,9 @@ MUTATION;
                 throw new \Exception("Metaobject Error: " . json_encode($body['data']['metaobjectCreate']['userErrors']));
             }
 
-            $metaobjectId = $body['data']['metaobjectCreate']['metaobject']['id'];
-
-            $customerMutation = <<<'MUTATION'
-            mutation customerUpdate($input: CustomerInput!) {
-              customerUpdate(input: $input) {
-                customer {
-                  id
-                }
-                userErrors {
-                  field
-                  message
-                }
-              }
-            }
-MUTATION;
-
-            $customerVariables = [
-                'input' => [
-                    'id' => "gid://shopify/Customer/{$numericCustomerId}",
-                    'metafields' => [
-                        [
-                            'namespace' => 'custom',
-                            'key' => 'details',
-                            'type' => 'metaobject_reference',
-                            'value' => $metaobjectId
-                        ],
-                        [
-                            'namespace' => 'custom',
-                            'key' => 'has_details',
-                            'type' => 'boolean',
-                            'value' => 'true'
-                        ]
-                    ]
-                ]
-            ];
-
-            $customerResponse = $graphQL->query(['query' => $customerMutation, 'variables' => $customerVariables]);
-            $customerBody = $customerResponse->getDecodedBody();
-
-            if (isset($customerBody['errors'])) {
-                \Illuminate\Support\Facades\Log::error("saveDetails: Customer Update GraphQL Errors: ", $customerBody['errors']);
-                throw new \Exception("Customer Update GraphQL Error: " . json_encode($customerBody['errors']));
-            }
-
-            if (!isset($customerBody['data'])) {
-                \Illuminate\Support\Facades\Log::error("saveDetails: Customer Update Missing 'data' key. Full body: ", $customerBody);
-                throw new \Exception("Unexpected response during Customer Update.");
-            }
-
-            if (!empty($customerBody['data']['customerUpdate']['userErrors'])) {
-                throw new \Exception("Customer Update Error: " . json_encode($customerBody['data']['customerUpdate']['userErrors']));
-            }
+            // --- Skip customer metafield update ---
+            // Shopify requires a pre-existing metafield definition on the Customer resource
+            // which is not created here. Instead we track the metaobject reference locally.
 
             $localCustomer = Customer::where('shopify_id', $numericCustomerId)->first();
             if (!$localCustomer) {
@@ -451,6 +402,9 @@ MUTATION;
                         'metaobject_id' => $metaobjectId
                     ])
                 );
+                \Illuminate\Support\Facades\Log::info("saveDetails: Successfully saved details for customer {$numericCustomerId}. Metaobject ID: {$metaobjectId}");
+            } else {
+                \Illuminate\Support\Facades\Log::warning("saveDetails: No local customer found for shopify_id={$numericCustomerId}. Details metaobject created ({$metaobjectId}) but not linked locally.");
             }
 
             return response()->json(['success' => true]);
