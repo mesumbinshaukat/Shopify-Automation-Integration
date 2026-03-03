@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Shopify Customer Discount Dashboard</title>
-    <script src="https://unpkg.com/@shopify/app-bridge@3"></script>
+    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+            data-api-key="{{ env('SHOPIFY_API_KEY') }}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -571,15 +572,6 @@
         const root = ReactDOM.createRoot(document.getElementById('app'));
         root.render(<App />);
 
-        const AppBridge = window['app-bridge'];
-        if (AppBridge) {
-            const createApp = AppBridge.default || AppBridge;
-            const app = createApp({
-                apiKey: "{{ env('SHOPIFY_API_KEY') }}",
-                host: new URLSearchParams(location.search).get("host"),
-                forceRedirect: true
-            });
-        }
     </script>
 </body>
 </html>

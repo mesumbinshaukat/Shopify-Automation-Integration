@@ -15,6 +15,14 @@ class ShopifyController extends Controller
             return response('Missing shop parameter', 400);
         }
 
+        // Check for an existing valid session first to avoid redundant OAuth redirects
+        $session = \App\Services\ShopifyService::loadSession($shop);
+        if ($session) {
+            // Valid session exists → skip OAuth, go straight to dashboard
+            $host = $request->query('host', '');
+            return redirect("/dashboard?shop={$shop}&host={$host}");
+        }
+
         // Redirect to a top-level route to ensure first-party cookie context
         $beginUrl = "/auth/begin?shop={$shop}";
         return view('breakout', ['installUrl' => $beginUrl]);
@@ -126,8 +134,20 @@ class ShopifyController extends Controller
         return setcookie($cookie->getName(), $cookie->getValue(), $options);
     }
     
-    public function dashboard()
+    public function dashboard(Request $request)
     {
+        $shop = $request->query('shop');
+        
+        if ($shop) {
+            // Robust check to ensure the session still exists (e.g. if the DB record was deleted)
+            $session = \App\Services\ShopifyService::loadSession($shop);
+            if (!$session) {
+                // Session gone or invalid → force re-auth
+                $beginUrl = "/auth/begin?shop={$shop}";
+                return view('breakout', ['installUrl' => $beginUrl]);
+            }
+        }
+
         $customers = Customer::all();
         return view('dashboard', compact('customers'));
     }
