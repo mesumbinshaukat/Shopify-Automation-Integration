@@ -18,7 +18,7 @@ class DatabaseSessionStorage implements SessionStorage
                 'scope'        => $session->getScope(),
                 'access_token' => $session->getAccessToken(),
                 'expires'      => $session->getExpires()?->format('Y-m-d H:i:s'),
-                'updated_at'   => now(),
+                'updated_at'   => \Illuminate\Support\Carbon::now(),
             ]
         );
         return true;
