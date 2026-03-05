@@ -9,6 +9,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/papaparse@5/papaparse.min.js"></script>
     <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, "Helvetica Neue", sans-serif; background-color: #f6f6f7; }
@@ -55,6 +56,8 @@
             
             const [isManagingDiscount, setIsManagingDiscount] = useState(null); // customer object
             const [isViewingDetails, setIsViewingDetails] = useState(null); // detail object
+            const [isImporting, setIsImporting] = useState(false);
+            const [importProgress, setImportProgress] = useState({ total: 0, processed: 0, failed: 0, errors: [] });
             const [selectedTargets, setSelectedTargets] = useState([]); // Array of IDs
             const [targetType, setTargetType] = useState('all');
             
@@ -211,6 +214,66 @@
                 }
             };
 
+            const handleCsvUpload = async (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const BATCH_SIZE = 15;
+                
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: async (results) => {
+                        const data = results.data;
+                        if (data.length === 0) {
+                            showToast("CSV is empty", "error");
+                            return;
+                        }
+
+                        setIsImporting(true);
+                        setImportProgress({ total: data.length, processed: 0, failed: 0, errors: [] });
+
+                        for (let i = 0; i < data.length; i += BATCH_SIZE) {
+                            const batch = data.slice(i, i + BATCH_SIZE);
+                            try {
+                                const res = await fetch('/api/customers/import', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ shop, customers: batch })
+                                });
+                                
+                                const result = await res.json();
+                                if (res.ok) {
+                                    setImportProgress(prev => ({
+                                        ...prev,
+                                        processed: prev.processed + result.success,
+                                        failed: prev.failed + result.failed,
+                                        errors: [...prev.errors, ...(result.errors || [])]
+                                    }));
+                                } else {
+                                    throw new Error(result.error || "Batch failed");
+                                }
+                            } catch (err) {
+                                console.error("Batch error:", err);
+                                setImportProgress(prev => ({
+                                    ...prev,
+                                    failed: prev.failed + batch.length,
+                                    errors: [...prev.errors, `Batch starting at row ${i + 1}: ${err.message}`]
+                                }));
+                            }
+                        }
+                        
+                        showToast(`Import completed with ${data.length} records processed.`);
+                        fetchAllData();
+                        // Reset file input
+                        event.target.value = '';
+                    },
+                    error: (err) => {
+                        showToast("Error parsing CSV: " + err.message, "error");
+                    }
+                });
+            };
+
             return (
                 <div className="max-w-6xl mx-auto pb-20 relative">
                     {/* Toast Notification Container */}
@@ -233,7 +296,13 @@
                         </div>
                         <div className="flex space-x-3">
                             {activeTab === 'customers' && (
-                                <button onClick={() => setIsCreatingCustomer(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition shadow-sm font-medium">Add Customer</button>
+                                <React.Fragment>
+                                    <button onClick={() => setIsCreatingCustomer(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition shadow-sm font-medium">Add Customer</button>
+                                    <button onClick={() => document.getElementById('csv-upload').click()} className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-50 transition shadow-sm font-medium flex items-center">
+                                        <span className="mr-2">📄</span> Bulk Import
+                                    </button>
+                                    <input id="csv-upload" type="file" accept=".csv" onChange={handleCsvUpload} className="hidden" />
+                                </React.Fragment>
                             )}
                             <button onClick={() => handleSync(activeTab)} className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-50 transition shadow-sm font-medium flex items-center">
                                 <span className="mr-2">🔄</span> Sync {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
@@ -562,6 +631,55 @@
                                         ))}
                                     </tbody>
                                 </table>
+                            </div>
+                        )}
+
+                        {/* Bulk Import Progress Modal */}
+                        {isImporting && (
+                            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
+                                <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+                                    <h3 className="text-xl font-bold mb-4 text-gray-800">CSV Import Progress</h3>
+                                    
+                                    <div className="mb-4">
+                                        <div className="flex justify-between text-sm mb-1">
+                                            <span className="text-gray-500 font-medium">Processing records...</span>
+                                            <span className="text-indigo-600 font-bold">{Math.round(((importProgress.processed + importProgress.failed) / importProgress.total) * 100)}%</span>
+                                        </div>
+                                        <div className="w-full bg-gray-200 rounded-full h-2.5">
+                                            <div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" style={{ width: `${((importProgress.processed + importProgress.failed) / importProgress.total) * 100}%` }}></div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4 mb-6">
+                                        <div className="bg-green-50 p-3 rounded-lg border border-green-100">
+                                            <div className="text-xs text-green-600 font-bold uppercase tracking-wider mb-1">Success</div>
+                                            <div className="text-2xl font-black text-green-700">{importProgress.processed}</div>
+                                        </div>
+                                        <div className="bg-red-50 p-3 rounded-lg border border-red-100">
+                                            <div className="text-xs text-red-600 font-bold uppercase tracking-wider mb-1">Failed</div>
+                                            <div className="text-2xl font-black text-red-700">{importProgress.failed}</div>
+                                        </div>
+                                    </div>
+
+                                    {importProgress.errors.length > 0 && (
+                                        <div className="mb-6">
+                                            <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Error Log (Last 5)</label>
+                                            <div className="bg-gray-50 rounded-lg p-3 border text-xs text-red-600 font-mono h-32 overflow-y-auto space-y-1">
+                                                {importProgress.errors.slice(-5).map((err, i) => (
+                                                    <div key={i}>• {err}</div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="flex justify-end pt-4 border-t">
+                                        {(importProgress.processed + importProgress.failed) === importProgress.total ? (
+                                            <button onClick={() => setIsImporting(false)} className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 font-bold transition">Close</button>
+                                        ) : (
+                                            <span className="text-gray-400 text-sm italic py-2">Please do not close this window...</span>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         )}
                     </div>

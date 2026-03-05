@@ -31,6 +31,7 @@ $router->group(['prefix' => 'api'], function ($router) {
         $router->put('/{id}/discount', 'CustomerController@updateDiscount');
         $router->post('/{id}/send-credentials', 'CustomerController@sendCredentials');
         $router->post('/save-details', 'CustomerController@saveDetails');
+        $router->post('/import', 'CustomerController@import');
         $router->get('/{id}/details', 'CustomerController@getDetails');
     });
 

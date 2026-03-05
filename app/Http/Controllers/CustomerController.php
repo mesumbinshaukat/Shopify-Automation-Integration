@@ -460,5 +460,137 @@ MUTATION;
         }
 
         return response()->json($details);
+
+    /**
+     * Batch import customers and their details (including Shopify Metaobjects).
+     * Designed to be called in batches of 10-20 to avoid timeouts.
+     */
+    public function import(Request $request)
+    {
+        $this->validate($request, [
+            'shop' => 'required',
+            'customers' => 'required|array'
+        ]);
+
+        $shop = $request->shop;
+        $session = \App\Services\ShopifyService::loadSession($shop);
+        if (!$session) {
+            return response()->json(['error' => 'Session expired or invalid for ' . $shop], 401);
+        }
+
+        $results = [
+            'success' => 0,
+            'failed'  => 0,
+            'errors'  => []
+        ];
+
+        foreach ($request->customers as $index => $data) {
+            $email = $data['email'] ?? null;
+            if (!$email) {
+                $results['failed']++;
+                $results['errors'][] = "Row " . ($index + 1) . ": Missing required email address.";
+                continue;
+            }
+
+            try {
+                // 1. Sync Shopify Customer
+                $sCust = new ShopifyCustomer($session);
+                $sCust->first_name = $data['first_name'] ?? '';
+                $sCust->last_name  = $data['last_name'] ?? '';
+                $sCust->email      = $data['email'] ?? '';
+
+                // Check for existing to avoid duplicates
+                $existing = ShopifyCustomer::all($session, ['email' => $sCust->email]);
+                if (!empty($existing)) {
+                    $sCust = $existing[0];
+                } else {
+                    $sCust->password = \Illuminate\Support\Str::random(10);
+                    $sCust->password_confirmation = $sCust->password;
+                    $sCust->save();
+                }
+
+                if (!$sCust->id) {
+                    throw new \Exception("Could not obtain Shopify ID for customer.");
+                }
+
+                // 2. Sync Local Customer Record
+                $localCustomer = Customer::updateOrCreate(
+                    ['email' => $sCust->email],
+                    [
+                        'shopify_id' => $sCust->id,
+                        'first_name' => $sCust->first_name,
+                        'last_name'  => $sCust->last_name,
+                    ]
+                );
+
+                // 3. Sync Metaobject (Details)
+                $detailsFields = [
+                    'company_name'         => $data['company_name'] ?? '',
+                    'physician_name'       => $data['physician_name'] ?? '',
+                    'npi'                  => $data['npi'] ?? '',
+                    'contact_name'         => $data['contact_name'] ?? '',
+                    'contact_email'        => $data['contact_email'] ?? '',
+                    'contact_phone_number' => $data['contact_phone_number'] ?? '',
+                    'sales_rep'            => $data['sales_rep'] ?? '',
+                    'po'                   => $data['po'] ?? '',
+                    'department'           => $data['department'] ?? '',
+                    'message'              => $data['message'] ?? '',
+                ];
+
+                $graphQL = new Graphql($session->getShop(), $session->getAccessToken());
+                $fields = [];
+                foreach ($detailsFields as $key => $value) {
+                    if ($value !== null && $value !== '') {
+                        $fields[] = ['key' => $key, 'value' => (string) $value];
+                    }
+                }
+
+                $metaobjectId = null;
+                if (!empty($fields)) {
+                    $metaobjectMutation = <<<'MUTATION'
+                    mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) {
+                      metaobjectCreate(metaobject: $metaobject) {
+                        metaobject { id }
+                        userErrors { field message }
+                      }
+                    }
+MUTATION;
+
+                    $response = $graphQL->query([
+                        'query' => $metaobjectMutation, 
+                        'variables' => [
+                            'metaobject' => [
+                                'type' => 'customerdetails',
+                                'fields' => $fields
+                            ]
+                        ]
+                    ]);
+                    $body = $response->getDecodedBody();
+                    
+                    if (!empty($body['data']['metaobjectCreate']['userErrors'])) {
+                        throw new \Exception("Metaobject UserError: " . $body['data']['metaobjectCreate']['userErrors'][0]['message']);
+                    }
+                    
+                    $metaobjectId = $body['data']['metaobjectCreate']['metaobject']['id'] ?? null;
+                }
+
+                // 4. Sync Local Details Record
+                CustomerDetail::updateOrCreate(
+                    ['customer_id' => $localCustomer->id],
+                    array_merge($detailsFields, [
+                        'shopify_customer_id' => (string) $sCust->id,
+                        'metaobject_id'       => $metaobjectId
+                    ])
+                );
+
+                $results['success']++;
+            } catch (\Exception $e) {
+                $results['failed']++;
+                $results['errors'][] = "{$email}: " . $e->getMessage();
+                \Illuminate\Support\Facades\Log::error("Import Error for {$email}: " . $e->getMessage());
+            }
+        }
+
+        return response()->json($results);
     }
 }
