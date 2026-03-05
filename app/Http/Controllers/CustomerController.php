@@ -460,6 +460,7 @@ MUTATION;
         }
 
         return response()->json($details);
+    }
 
     /**
      * Batch import customers and their details (including Shopify Metaobjects).

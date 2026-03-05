@@ -646,7 +646,7 @@
                                             <span className="text-indigo-600 font-bold">{Math.round(((importProgress.processed + importProgress.failed) / importProgress.total) * 100)}%</span>
                                         </div>
                                         <div className="w-full bg-gray-200 rounded-full h-2.5">
-                                            <div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" style={{ width: `${((importProgress.processed + importProgress.failed) / importProgress.total) * 100}%` }}></div>
+                                            <div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" style={ { width: `${((importProgress.processed + importProgress.failed) / importProgress.total) * 100}%` } }></div>
                                         </div>
                                     </div>
 
