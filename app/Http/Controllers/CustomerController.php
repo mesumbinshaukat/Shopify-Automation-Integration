@@ -13,7 +13,9 @@ class CustomerController extends Controller
 {
     public function index()
     {
-        return response()->json(Customer::all());
+        $customers = Customer::all();
+        \Illuminate\Support\Facades\Log::info("CustomerController@index: Returning " . $customers->count() . " customers.");
+        return response()->json($customers);
     }
 
     public function store(Request $request)
@@ -474,8 +476,11 @@ MUTATION;
         ]);
 
         $shop = $request->shop;
+        \Illuminate\Support\Facades\Log::info("import: Starting batch import for shop: {$shop}", ['count' => count($request->customers)]);
+
         $session = \App\Services\ShopifyService::loadSession($shop);
         if (!$session) {
+            \Illuminate\Support\Facades\Log::error("import: Failed to load session for {$shop}");
             return response()->json(['error' => 'Session expired or invalid for ' . $shop], 401);
         }
 
@@ -486,7 +491,9 @@ MUTATION;
         ];
 
         foreach ($request->customers as $index => $data) {
-            $email = $data['email'] ?? null;
+            // Normalize keys to lowercase and trim values
+            $data = array_change_key_case($data, CASE_LOWER);
+            $email = isset($data['email']) ? strtolower(trim($data['email'])) : null;
             if (!$email) {
                 $results['failed']++;
                 $results['errors'][] = "Row " . ($index + 1) . ": Missing required email address.";
@@ -500,29 +507,34 @@ MUTATION;
                 $sCust->last_name  = $data['last_name'] ?? '';
                 $sCust->email      = $data['email'] ?? '';
 
+                \Illuminate\Support\Facades\Log::info("import: Syncing customer {$email}");
+
                 // Check for existing to avoid duplicates
                 $existing = ShopifyCustomer::all($session, ['email' => $sCust->email]);
                 if (!empty($existing)) {
                     $sCust = $existing[0];
+                    \Illuminate\Support\Facades\Log::info("import: Found existing Shopify customer: {$sCust->id}");
                 } else {
                     $sCust->password = \Illuminate\Support\Str::random(10);
                     $sCust->password_confirmation = $sCust->password;
                     $sCust->save();
+                    \Illuminate\Support\Facades\Log::info("import: Created new Shopify customer: {$sCust->id}");
                 }
 
                 if (!$sCust->id) {
                     throw new \Exception("Could not obtain Shopify ID for customer.");
                 }
 
-                // 2. Sync Local Customer Record
+                // 2. Sync Local Customer Record - Use the data from CSV to update names locally
                 $localCustomer = Customer::updateOrCreate(
-                    ['email' => $sCust->email],
+                    ['email' => strtolower($email)],
                     [
-                        'shopify_id' => $sCust->id,
-                        'first_name' => $sCust->first_name,
-                        'last_name'  => $sCust->last_name,
+                        'shopify_id' => (string) $sCust->id,
+                        'first_name' => $data['first_name'] ?? $sCust->first_name ?? '',
+                        'last_name'  => $data['last_name'] ?? $sCust->last_name ?? '',
                     ]
                 );
+                \Illuminate\Support\Facades\Log::info("import: Local customer record synced: Local ID {$localCustomer->id}, Shopify ID {$sCust->id}");
 
                 // 3. Sync Metaobject (Details)
                 $detailsFields = [
@@ -568,11 +580,19 @@ MUTATION;
                     ]);
                     $body = $response->getDecodedBody();
                     
+                    if (isset($body['errors'])) {
+                        \Illuminate\Support\Facades\Log::error("import: GraphQL Top-level Errors for {$email}: ", $body['errors']);
+                        throw new \Exception("GraphQL Errors: " . json_encode($body['errors']));
+                    }
+
                     if (!empty($body['data']['metaobjectCreate']['userErrors'])) {
-                        throw new \Exception("Metaobject UserError: " . $body['data']['metaobjectCreate']['userErrors'][0]['message']);
+                        $errMessage = $body['data']['metaobjectCreate']['userErrors'][0]['message'];
+                        \Illuminate\Support\Facades\Log::error("import: Metaobject UserError for {$email}: {$errMessage}");
+                        throw new \Exception("Metaobject UserError: " . $errMessage);
                     }
                     
                     $metaobjectId = $body['data']['metaobjectCreate']['metaobject']['id'] ?? null;
+                    \Illuminate\Support\Facades\Log::info("import: Metaobject created for {$email}: ID {$metaobjectId}");
                 }
 
                 // 4. Sync Local Details Record
@@ -583,6 +603,7 @@ MUTATION;
                         'metaobject_id'       => $metaobjectId
                     ])
                 );
+                \Illuminate\Support\Facades\Log::info("import: Local details synced for {$email}");
 
                 $results['success']++;
             } catch (\Exception $e) {

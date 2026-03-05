@@ -223,6 +223,7 @@
                 Papa.parse(file, {
                     header: true,
                     skipEmptyLines: true,
+                    transformHeader: (h) => h.toLowerCase().trim(),
                     complete: async (results) => {
                         const data = results.data;
                         if (data.length === 0) {
