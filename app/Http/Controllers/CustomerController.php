@@ -51,11 +51,16 @@ class CustomerController extends Controller
             if (!$sCust->id) {
                 try {
                     $matches = ShopifyCustomer::all($session, ['email' => $request->email]);
+                    $found = null;
                     foreach ($matches as $match) {
-                        if (strtolower($match->email) === strtolower($request->email)) {
-                            $sCust = $match;
+                        if (strtolower(trim($match->email)) === strtolower(trim($request->email))) {
+                            $found = $match;
                             break;
                         }
+                    }
+                    if ($found) {
+                        $sCust = $found;
+                        \Illuminate\Support\Facades\Log::info("store: Found existing Shopify customer via rescue sync: {$sCust->id}");
                     }
                 } catch (\Exception $e) {
                     \Illuminate\Support\Facades\Log::warning("CustomerController: Rescue sync failed for {$request->email}: " . $e->getMessage());
@@ -509,11 +514,19 @@ MUTATION;
 
                 \Illuminate\Support\Facades\Log::info("import: Syncing customer {$email}");
 
-                // Check for existing to avoid duplicates
-                $existing = ShopifyCustomer::all($session, ['email' => $sCust->email]);
-                if (!empty($existing)) {
-                    $sCust = $existing[0];
-                    \Illuminate\Support\Facades\Log::info("import: Found existing Shopify customer: {$sCust->id}");
+                // Check for existing to avoid duplicates - CRITICAL: verify email match
+                $existing = ShopifyCustomer::all($session, ['email' => $email]);
+                $found = null;
+                foreach ($existing as $match) {
+                    if (strtolower(trim($match->email)) === strtolower(trim($email))) {
+                        $found = $match;
+                        break;
+                    }
+                }
+
+                if ($found) {
+                    $sCust = $found;
+                    \Illuminate\Support\Facades\Log::info("import: Found existing Shopify customer with strict match: {$sCust->id}");
                 } else {
                     $sCust->password = \Illuminate\Support\Str::random(10);
                     $sCust->password_confirmation = $sCust->password;
