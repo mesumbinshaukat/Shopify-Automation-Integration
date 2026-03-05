@@ -33,26 +33,46 @@ class CustomerController extends Controller
         }
 
         try {
-            // Use the new robust helper
-            $sCust = $this->getOrCreateShopifyCustomer($session, [
-                'first_name' => $request->first_name,
-                'last_name' => $request->last_name,
-                'email' => $request->email,
-                'password' => $request->password ?? \Illuminate\Support\Str::random(10)
-            ]);
+            // 1. Save to Shopify - Following original flow
+            $sCust = new ShopifyCustomer($session);
+            $sCust->first_name = $request->first_name;
+            $sCust->last_name = $request->last_name;
+            $sCust->email = strtolower(trim($request->email));
+            $sCust->password = $request->password ?? \Illuminate\Support\Str::random(10);
+            $sCust->password_confirmation = $sCust->password;
+            
+            try {
+                $sCust->save();
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::warning("store: Save threw exception, attempting rescue sync: " . $e->getMessage());
+            }
 
-            // 2. Create or Update Local Record
+            // 2. Optimistic Sync: If we don't have the ID, try to find strictly by email
+            if (!$sCust->id) {
+                try {
+                    $matches = ShopifyCustomer::all($session, ['email' => $sCust->email]);
+                    foreach ($matches as $match) {
+                        if (strtolower(trim($match->email)) === strtolower(trim($sCust->email))) {
+                            $sCust = $match;
+                            break;
+                        }
+                    }
+                } catch (\Exception $e) {
+                    \Illuminate\Support\Facades\Log::warning("store: Rescue sync failed for {$sCust->email}");
+                }
+            }
+
+            // 3. Create or Update Local Record
             $customer = Customer::updateOrCreate(
                 ['email' => strtolower(trim($request->email))],
                 [
-                    'shopify_id' => (string) $sCust->id,
+                    'shopify_id' => (string) ($sCust->id ?? null),
                     'first_name' => $sCust->first_name ?? $request->first_name,
                     'last_name' => $sCust->last_name ?? $request->last_name,
                 ]
             );
 
             return response()->json($customer, 201);
-
         } catch (\Exception $e) {
             return response()->json(['error' => 'Creation Issue: ' . $e->getMessage()], 500);
         }
@@ -455,186 +475,66 @@ MUTATION;
         ]);
 
         $shop = $request->shop;
-        \Illuminate\Support\Facades\Log::info("import: Starting batch import for shop: {$shop}", ['count' => count($request->customers)]);
-
         $session = \App\Services\ShopifyService::loadSession($shop);
         if (!$session) {
-            \Illuminate\Support\Facades\Log::error("import: Failed to load session for {$shop}");
             return response()->json(['error' => 'Session expired or invalid for ' . $shop], 401);
         }
 
-        $results = [
-            'success' => 0,
-            'failed'  => 0,
-            'errors'  => []
-        ];
+        $results = ['success' => 0, 'failed' => 0, 'errors' => []];
 
         foreach ($request->customers as $index => $data) {
-            // Normalize keys to lowercase and trim values
             $data = array_change_key_case($data, CASE_LOWER);
             $email = isset($data['email']) ? strtolower(trim($data['email'])) : null;
+            
             if (!$email) {
                 $results['failed']++;
-                $results['errors'][] = "Row " . ($index + 1) . ": Missing required email address.";
+                $results['errors'][] = "Row " . ($index + 1) . ": Missing email.";
                 continue;
             }
 
             try {
-                // 1. Sync Shopify Customer using robust helper
-                $sCust = $this->getOrCreateShopifyCustomer($session, [
-                    'first_name' => $data['first_name'] ?? '',
-                    'last_name'  => $data['last_name'] ?? '',
-                    'email'      => $email
-                ]);
+                // FOLLOWING THE EXISTING CUSTOMER FLOW EXACTLY
+                $sCust = new ShopifyCustomer($session);
+                $sCust->first_name = $data['first_name'] ?? '';
+                $sCust->last_name = $data['last_name'] ?? '';
+                $sCust->email = $email;
+                $sCust->password = \Illuminate\Support\Str::random(10);
+                $sCust->password_confirmation = $sCust->password;
 
+                try {
+                    $sCust->save();
+                } catch (\Exception $e) { }
+
+                // Rescue sync if ID missing
                 if (!$sCust->id) {
-                    throw new \Exception("Could not obtain Shopify ID for customer.");
+                    try {
+                        $matches = ShopifyCustomer::all($session, ['email' => $email]);
+                        foreach ($matches as $match) {
+                            if (strtolower(trim($match->email)) === $email) {
+                                $sCust = $match;
+                                break;
+                            }
+                        }
+                    } catch (\Exception $e) { }
                 }
 
-                // 2. Sync Local Customer Record - Use the data from CSV to update names locally
-                $localCustomer = Customer::updateOrCreate(
-                    ['email' => strtolower($email)],
+                // Sync Local Record
+                Customer::updateOrCreate(
+                    ['email' => $email],
                     [
-                        'shopify_id' => (string) $sCust->id,
-                        'first_name' => $data['first_name'] ?? $sCust->first_name ?? '',
-                        'last_name'  => $data['last_name'] ?? $sCust->last_name ?? '',
+                        'shopify_id' => (string) ($sCust->id ?? null),
+                        'first_name' => $sCust->first_name ?? ($data['first_name'] ?? ''),
+                        'last_name' => $sCust->last_name ?? ($data['last_name'] ?? ''),
                     ]
                 );
-                \Illuminate\Support\Facades\Log::info("import: Local customer record synced: Local ID {$localCustomer->id}, Shopify ID {$sCust->id}");
-
-                // 3. Sync Metaobject (Details)
-                $detailsFields = [
-                    'company_name'         => $data['company_name'] ?? '',
-                    'physician_name'       => $data['physician_name'] ?? '',
-                    'npi'                  => $data['npi'] ?? '',
-                    'contact_name'         => $data['contact_name'] ?? '',
-                    'contact_email'        => $data['contact_email'] ?? '',
-                    'contact_phone_number' => $data['contact_phone_number'] ?? '',
-                    'sales_rep'            => $data['sales_rep'] ?? '',
-                    'po'                   => $data['po'] ?? '',
-                    'department'           => $data['department'] ?? '',
-                    'message'              => $data['message'] ?? '',
-                ];
-
-                $graphQL = new Graphql($session->getShop(), $session->getAccessToken());
-                $fields = [];
-                foreach ($detailsFields as $key => $value) {
-                    if ($value !== null && $value !== '') {
-                        $fields[] = ['key' => $key, 'value' => (string) $value];
-                    }
-                }
-
-                $metaobjectId = null;
-                if (!empty($fields)) {
-                    $metaobjectMutation = <<<'MUTATION'
-                    mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) {
-                      metaobjectCreate(metaobject: $metaobject) {
-                        metaobject { id }
-                        userErrors { field message }
-                      }
-                    }
-MUTATION;
-
-                    $response = $graphQL->query([
-                        'query' => $metaobjectMutation, 
-                        'variables' => [
-                            'metaobject' => [
-                                'type' => 'customerdetails',
-                                'fields' => $fields
-                            ]
-                        ]
-                    ]);
-                    $body = $response->getDecodedBody();
-                    
-                    if (isset($body['errors'])) {
-                        \Illuminate\Support\Facades\Log::error("import: GraphQL Top-level Errors for {$email}: ", $body['errors']);
-                        throw new \Exception("GraphQL Errors: " . json_encode($body['errors']));
-                    }
-
-                    if (!empty($body['data']['metaobjectCreate']['userErrors'])) {
-                        $errMessage = $body['data']['metaobjectCreate']['userErrors'][0]['message'];
-                        \Illuminate\Support\Facades\Log::error("import: Metaobject UserError for {$email}: {$errMessage}");
-                        throw new \Exception("Metaobject UserError: " . $errMessage);
-                    }
-                    
-                    $metaobjectId = $body['data']['metaobjectCreate']['metaobject']['id'] ?? null;
-                    \Illuminate\Support\Facades\Log::info("import: Metaobject created for {$email}: ID {$metaobjectId}");
-                }
-
-                // 4. Sync Local Details Record
-                CustomerDetail::updateOrCreate(
-                    ['customer_id' => $localCustomer->id],
-                    array_merge($detailsFields, [
-                        'shopify_customer_id' => (string) $sCust->id,
-                        'metaobject_id'       => $metaobjectId
-                    ])
-                );
-                \Illuminate\Support\Facades\Log::info("import: Local details synced for {$email}");
 
                 $results['success']++;
             } catch (\Exception $e) {
                 $results['failed']++;
-                $results['errors'][] = "{$email}: " . $e->getMessage();
-                \Illuminate\Support\Facades\Log::error("Import Error for {$email}: " . $e->getMessage());
+                $results['errors'][] = "Row " . ($index + 1) . ": " . $e->getMessage();
             }
         }
 
         return response()->json($results);
-    }
-
-    /**
-     * Robustly find or create a Shopify customer, ensuring the ID is retrieved.
-     */
-    private function getOrCreateShopifyCustomer($session, array $data)
-    {
-        $email = strtolower(trim($data['email']));
-        
-        // 1. Search for existing strictly
-        \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: Searching for existing customer: {$email}");
-        $matches = ShopifyCustomer::all($session, ['email' => $email]);
-        foreach ($matches as $match) {
-            if (strtolower(trim($match->email)) === $email) {
-                \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: Found existing customer: {$match->id}");
-                return $match;
-            }
-        }
-
-        // 2. Create if not found
-        \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: No existing found, creating new for {$email}");
-        $sCust = new ShopifyCustomer($session);
-        $sCust->first_name = $data['first_name'];
-        $sCust->last_name = $data['last_name'];
-        $sCust->email = $email;
-        $sCust->password = $data['password'] ?? \Illuminate\Support\Str::random(10);
-        $sCust->password_confirmation = $sCust->password;
-        
-        try {
-            $sCust->save();
-            \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: Save requested for {$email}. ID after save: " . ($sCust->id ?? 'NULL'));
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning("getOrCreateShopifyCustomer: Save threw exception for {$email}, will attempt rescue: " . $e->getMessage());
-        }
-
-        // 3. Post-save rescue sync: If ID is still missing, re-query strictly
-        if (!$sCust->id) {
-            \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: ID missing post-save, attempting rescue sync for {$email}");
-            // Optional: short sleep to allow indexing
-            usleep(500000); // 0.5 seconds
-            
-            $matches = ShopifyCustomer::all($session, ['email' => $email]);
-            foreach ($matches as $match) {
-                if (strtolower(trim($match->email)) === $email) {
-                    \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: Rescue sync successful! ID: {$match->id}");
-                    return $match;
-                }
-            }
-        }
-
-        if (!$sCust->id) {
-            \Illuminate\Support\Facades\Log::error("getOrCreateShopifyCustomer: Fatal failure to obtain ID for {$email}");
-            throw new \Exception("Could not obtain Shopify ID for {$email} even after rescue sync.");
-        }
-
-        return $sCust;
     }
 }
