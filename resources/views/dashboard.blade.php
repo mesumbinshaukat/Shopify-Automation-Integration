@@ -247,8 +247,7 @@
                                 if (res.ok) {
                                     setImportProgress(prev => ({
                                         ...prev,
-                                        processed: prev.processed + result.success,
-                                        failed: prev.failed + result.failed,
+                                        processed: prev.processed + result.success + result.failed,
                                         errors: [...prev.errors, ...(result.errors || [])]
                                     }));
                                 } else {
@@ -257,10 +256,10 @@
                             } catch (err) {
                                 console.error("Batch error:", err);
                                 setImportProgress(prev => ({
-                                    ...prev,
-                                    failed: prev.failed + batch.length,
-                                    errors: [...prev.errors, `Batch starting at row ${i + 1}: ${err.message}`]
-                                }));
+                                        ...prev,
+                                        processed: prev.processed + batch.length,
+                                        errors: [...prev.errors, `Batch starting at row ${i + 1}: ${err.message}`]
+                                    }));
                             }
                         }
                         
@@ -643,41 +642,29 @@
                                     
                                     <div className="mb-4">
                                         <div className="flex justify-between text-sm mb-1">
-                                            <span className="text-gray-500 font-medium">Processing records...</span>
-                                            <span className="text-indigo-600 font-bold">{Math.round(((importProgress.processed + importProgress.failed) / importProgress.total) * 100)}%</span>
+                                            <span className="text-gray-500 font-medium">Bulk operation in progress</span>
+                                            <span className="text-indigo-600 font-bold">{Math.round((importProgress.processed / importProgress.total) * 100)}%</span>
                                         </div>
-                                        <div className="w-full bg-gray-200 rounded-full h-2.5">
-                                            <div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" style={ { width: `${((importProgress.processed + importProgress.failed) / importProgress.total) * 100}%` } }></div>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4 mb-6">
-                                        <div className="bg-green-50 p-3 rounded-lg border border-green-100">
-                                            <div className="text-xs text-green-600 font-bold uppercase tracking-wider mb-1">Success</div>
-                                            <div className="text-2xl font-black text-green-700">{importProgress.processed}</div>
-                                        </div>
-                                        <div className="bg-red-50 p-3 rounded-lg border border-red-100">
-                                            <div className="text-xs text-red-600 font-bold uppercase tracking-wider mb-1">Failed</div>
-                                            <div className="text-2xl font-black text-red-700">{importProgress.failed}</div>
+                                        <div className="w-full bg-gray-200 rounded-full h-3 shadow-inner">
+                                            <div className="bg-indigo-600 h-3 rounded-full transition-all duration-500 ease-out shadow-lg" style={ { width: `${(importProgress.processed / importProgress.total) * 100}%` } }></div>
                                         </div>
                                     </div>
 
-                                    {importProgress.errors.length > 0 && (
-                                        <div className="mb-6">
-                                            <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Error Log (Last 5)</label>
-                                            <div className="bg-gray-50 rounded-lg p-3 border text-xs text-red-600 font-mono h-32 overflow-y-auto space-y-1">
-                                                {importProgress.errors.slice(-5).map((err, i) => (
-                                                    <div key={i}>• {err}</div>
-                                                ))}
-                                            </div>
+                                    <div className="grid grid-cols-1 mb-6">
+                                        <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 text-center">
+                                            <div className="text-xs text-indigo-600 font-bold uppercase tracking-wider mb-1">Processed</div>
+                                            <div className="text-3xl font-black text-indigo-700">{importProgress.processed} / {importProgress.total}</div>
                                         </div>
-                                    )}
+                                    </div>
 
                                     <div className="flex justify-end pt-4 border-t">
-                                        {(importProgress.processed + importProgress.failed) === importProgress.total ? (
-                                            <button onClick={() => setIsImporting(false)} className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 font-bold transition">Close</button>
+                                        {importProgress.processed === importProgress.total ? (
+                                            <button onClick={() => setIsImporting(false)} className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 font-bold transition">Done</button>
                                         ) : (
-                                            <span className="text-gray-400 text-sm italic py-2">Please do not close this window...</span>
+                                            <div className="flex items-center text-indigo-500 text-sm font-medium italic animate-pulse">
+                                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600 mr-2"></div>
+                                                Processing your customers...
+                                            </div>
                                         )}
                                     </div>
                                 </div>

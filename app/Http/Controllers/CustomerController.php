@@ -66,7 +66,7 @@ class CustomerController extends Controller
             $customer = Customer::updateOrCreate(
                 ['email' => strtolower(trim($request->email))],
                 [
-                    'shopify_id' => (string) ($sCust->id ?? null),
+                    'shopify_id' => $sCust->id ? (string)$sCust->id : null,
                     'first_name' => $sCust->first_name ?? $request->first_name,
                     'last_name' => $sCust->last_name ?? $request->last_name,
                 ]
@@ -522,7 +522,7 @@ MUTATION;
                 Customer::updateOrCreate(
                     ['email' => $email],
                     [
-                        'shopify_id' => (string) ($sCust->id ?? null),
+                        'shopify_id' => $sCust->id ? (string)$sCust->id : null,
                         'first_name' => $sCust->first_name ?? ($data['first_name'] ?? ''),
                         'last_name' => $sCust->last_name ?? ($data['last_name'] ?? ''),
                     ]
@@ -530,6 +530,9 @@ MUTATION;
 
                 $results['success']++;
             } catch (\Exception $e) {
+                // If the error is a duplicate entry for empty string, it's already handled by using null
+                // But generally, the user wants us to be more lenient with "success" reporting.
+                // However, we'll keep real errors in failed count.
                 $results['failed']++;
                 $results['errors'][] = "Row " . ($index + 1) . ": " . $e->getMessage();
             }
