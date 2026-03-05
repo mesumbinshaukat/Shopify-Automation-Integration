@@ -17,10 +17,11 @@ class ShopifyCSP
     {
         $response = $next($request);
 
-        $shop = $request->get('shop');
-        $cspDomain = $shop ? "https://{$shop}" : "https://*.myshopify.com";
-
-        $response->header('Content-Security-Policy', "frame-ancestors {$cspDomain} https://admin.shopify.com;");
+        if ($response instanceof \Symfony\Component\HttpFoundation\Response) {
+            $shop = $request->get('shop');
+            $cspDomain = $shop ? "https://{$shop}" : "https://*.myshopify.com";
+            $response->headers->set('Content-Security-Policy', "frame-ancestors {$cspDomain} https://admin.shopify.com;");
+        }
 
         return $response;
     }
