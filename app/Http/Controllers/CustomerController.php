@@ -33,45 +33,19 @@ class CustomerController extends Controller
         }
 
         try {
-            // 1. Save to Shopify
-            $sCust = new ShopifyCustomer($session);
-            $sCust->first_name = $request->first_name;
-            $sCust->last_name = $request->last_name;
-            $sCust->email = $request->email;
-            $sCust->password = $request->password ?? \Illuminate\Support\Str::random(10);
-            $sCust->password_confirmation = $sCust->password;
-            
-            try {
-                $sCust->save();
-            } catch (\Exception $e) {
-                // Creation usually succeeds even if the SDK throws a minor network exception
-            }
+            // Use the new robust helper
+            $sCust = $this->getOrCreateShopifyCustomer($session, [
+                'first_name' => $request->first_name,
+                'last_name' => $request->last_name,
+                'email' => $request->email,
+                'password' => $request->password ?? \Illuminate\Support\Str::random(10)
+            ]);
 
-            // 2. Optimistic Sync: If we don't have the ID immediately, try to find the customer by email
-            if (!$sCust->id) {
-                try {
-                    $matches = ShopifyCustomer::all($session, ['email' => $request->email]);
-                    $found = null;
-                    foreach ($matches as $match) {
-                        if (strtolower(trim($match->email)) === strtolower(trim($request->email))) {
-                            $found = $match;
-                            break;
-                        }
-                    }
-                    if ($found) {
-                        $sCust = $found;
-                        \Illuminate\Support\Facades\Log::info("store: Found existing Shopify customer via rescue sync: {$sCust->id}");
-                    }
-                } catch (\Exception $e) {
-                    \Illuminate\Support\Facades\Log::warning("CustomerController: Rescue sync failed for {$request->email}: " . $e->getMessage());
-                }
-            }
-
-            // 3. Create or Update Local Record
+            // 2. Create or Update Local Record
             $customer = Customer::updateOrCreate(
-                ['email' => $request->email],
+                ['email' => strtolower(trim($request->email))],
                 [
-                    'shopify_id' => $sCust->id ?? null,
+                    'shopify_id' => (string) $sCust->id,
                     'first_name' => $sCust->first_name ?? $request->first_name,
                     'last_name' => $sCust->last_name ?? $request->last_name,
                 ]
@@ -506,33 +480,12 @@ MUTATION;
             }
 
             try {
-                // 1. Sync Shopify Customer
-                $sCust = new ShopifyCustomer($session);
-                $sCust->first_name = $data['first_name'] ?? '';
-                $sCust->last_name  = $data['last_name'] ?? '';
-                $sCust->email      = $data['email'] ?? '';
-
-                \Illuminate\Support\Facades\Log::info("import: Syncing customer {$email}");
-
-                // Check for existing to avoid duplicates - CRITICAL: verify email match
-                $existing = ShopifyCustomer::all($session, ['email' => $email]);
-                $found = null;
-                foreach ($existing as $match) {
-                    if (strtolower(trim($match->email)) === strtolower(trim($email))) {
-                        $found = $match;
-                        break;
-                    }
-                }
-
-                if ($found) {
-                    $sCust = $found;
-                    \Illuminate\Support\Facades\Log::info("import: Found existing Shopify customer with strict match: {$sCust->id}");
-                } else {
-                    $sCust->password = \Illuminate\Support\Str::random(10);
-                    $sCust->password_confirmation = $sCust->password;
-                    $sCust->save();
-                    \Illuminate\Support\Facades\Log::info("import: Created new Shopify customer: {$sCust->id}");
-                }
+                // 1. Sync Shopify Customer using robust helper
+                $sCust = $this->getOrCreateShopifyCustomer($session, [
+                    'first_name' => $data['first_name'] ?? '',
+                    'last_name'  => $data['last_name'] ?? '',
+                    'email'      => $email
+                ]);
 
                 if (!$sCust->id) {
                     throw new \Exception("Could not obtain Shopify ID for customer.");
@@ -627,5 +580,61 @@ MUTATION;
         }
 
         return response()->json($results);
+    }
+
+    /**
+     * Robustly find or create a Shopify customer, ensuring the ID is retrieved.
+     */
+    private function getOrCreateShopifyCustomer($session, array $data)
+    {
+        $email = strtolower(trim($data['email']));
+        
+        // 1. Search for existing strictly
+        \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: Searching for existing customer: {$email}");
+        $matches = ShopifyCustomer::all($session, ['email' => $email]);
+        foreach ($matches as $match) {
+            if (strtolower(trim($match->email)) === $email) {
+                \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: Found existing customer: {$match->id}");
+                return $match;
+            }
+        }
+
+        // 2. Create if not found
+        \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: No existing found, creating new for {$email}");
+        $sCust = new ShopifyCustomer($session);
+        $sCust->first_name = $data['first_name'];
+        $sCust->last_name = $data['last_name'];
+        $sCust->email = $email;
+        $sCust->password = $data['password'] ?? \Illuminate\Support\Str::random(10);
+        $sCust->password_confirmation = $sCust->password;
+        
+        try {
+            $sCust->save();
+            \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: Save requested for {$email}. ID after save: " . ($sCust->id ?? 'NULL'));
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning("getOrCreateShopifyCustomer: Save threw exception for {$email}, will attempt rescue: " . $e->getMessage());
+        }
+
+        // 3. Post-save rescue sync: If ID is still missing, re-query strictly
+        if (!$sCust->id) {
+            \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: ID missing post-save, attempting rescue sync for {$email}");
+            // Optional: short sleep to allow indexing
+            usleep(500000); // 0.5 seconds
+            
+            $matches = ShopifyCustomer::all($session, ['email' => $email]);
+            foreach ($matches as $match) {
+                if (strtolower(trim($match->email)) === $email) {
+                    \Illuminate\Support\Facades\Log::info("getOrCreateShopifyCustomer: Rescue sync successful! ID: {$match->id}");
+                    return $match;
+                }
+            }
+        }
+
+        if (!$sCust->id) {
+            \Illuminate\Support\Facades\Log::error("getOrCreateShopifyCustomer: Fatal failure to obtain ID for {$email}");
+            throw new \Exception("Could not obtain Shopify ID for {$email} even after rescue sync.");
+        }
+
+        return $sCust;
     }
 }
