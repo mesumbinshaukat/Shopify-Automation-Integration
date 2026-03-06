@@ -267,41 +267,13 @@ class CustomerController extends Controller
              return response()->json(['error' => 'Missing shop parameter'], 400);
         }
 
-        // 2. Security Check: Verify Shopify App Proxy Signature (Matches DiscountController)
-        if (config('app.env') === 'production') {
-            $queryParams = $request->query();
-            $signature = $queryParams['signature'] ?? '';
-            
-            if (empty($signature)) {
-                \Illuminate\Support\Facades\Log::error("saveDetails: Missing signature parameter for shop $shop");
-                return response()->json(['error' => 'Missing signature'], 401);
-            }
-
-            unset($queryParams['signature']);
-            ksort($queryParams);
-            
-            $messageParts = [];
-            foreach ($queryParams as $key => $value) {
-                if (is_array($value)) {
-                    foreach ($value as $v) {
-                        $messageParts[] = "{$key}={$v}";
-                    }
-                } else {
-                    $messageParts[] = "{$key}={$value}";
-                }
-            }
-            sort($messageParts);
-            $message = implode('', $messageParts);
-            
-            $calculatedHmac = hash_hmac('sha256', $message, env('SHOPIFY_API_SECRET'));
-
-            if (!hash_equals($calculatedHmac, $signature)) {
-                \Illuminate\Support\Facades\Log::error("saveDetails: HMAC mismatch for shop $shop. Message: '$message'. Calculated: $calculatedHmac, Received: $signature");
-                return response()->json(['error' => 'Invalid signature'], 401);
-            }
-            
-            \Illuminate\Support\Facades\Log::info("saveDetails: Signature verified successfully for shop $shop");
+        // 2. Security Check: Verify Shopify App Proxy Signature
+        $signatureError = $this->validateProxySignature($request);
+        if ($signatureError) {
+            return $signatureError;
         }
+
+        \Illuminate\Support\Facades\Log::info("saveDetails: Signature verified successfully for shop $shop");
 
         // 3. Resolve the Session
         $session = \App\Services\ShopifyService::loadSession($shop);
@@ -553,35 +525,9 @@ MUTATION;
         }
 
         // 1. Security Check: Verify Shopify App Proxy Signature
-        if (config('app.env') === 'production') {
-            $queryParams = $request->query();
-            $signature = $queryParams['signature'] ?? '';
-            
-            if (empty($signature)) {
-                return response()->json(['error' => 'Missing signature'], 401);
-            }
-
-            unset($queryParams['signature']);
-            ksort($queryParams);
-            
-            $messageParts = [];
-            foreach ($queryParams as $key => $value) {
-                if (is_array($value)) {
-                    foreach ($value as $v) {
-                        $messageParts[] = "{$key}={$v}";
-                    }
-                } else {
-                    $messageParts[] = "{$key}={$value}";
-                }
-            }
-            sort($messageParts);
-            $message = implode('', $messageParts);
-            
-            $calculatedHmac = hash_hmac('sha256', $message, env('SHOPIFY_API_SECRET'));
-
-            if (!hash_equals($calculatedHmac, $signature)) {
-                return response()->json(['error' => 'Invalid signature'], 401);
-            }
+        $signatureError = $this->validateProxySignature($request);
+        if ($signatureError) {
+            return $signatureError;
         }
 
         // 2. Validation
@@ -606,14 +552,28 @@ MUTATION;
             return response()->json(['error' => 'Session issues. Please try again later.'], 401);
         }
 
-        // 4. Edge Case: Check if email already exists in Shopify
+        // 4. Edge Case: Check if email already exists in Shopify via GraphQL
         try {
-            $existing = ShopifyCustomer::all($session, ['email' => $email]);
-            if (count($existing) > 0) {
+            $graphQL = new Graphql($session->getShop(), $session->getAccessToken());
+            $searchQuery = <<<'QUERY'
+            query($q: String!) {
+              customers(first: 1, query: $q) {
+                edges {
+                  node {
+                    id
+                  }
+                }
+              }
+            }
+QUERY;
+            $searchResponse = $graphQL->query(['query' => $searchQuery, 'variables' => ['q' => "email:$email"]]);
+            $searchBody = $searchResponse->getDecodedBody();
+            
+            if (!empty($searchBody['data']['customers']['edges'])) {
                 return response()->json(['error' => 'This email is already registered as a customer.'], 422);
             }
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning("requestAccess: Shopify customer check failed: " . $e->getMessage());
+            \Illuminate\Support\Facades\Log::warning("requestAccess: Shopify customer GraphQL check failed: " . $e->getMessage());
         }
 
         try {
@@ -635,7 +595,7 @@ MUTATION;
                 }
             }
 
-            // Handle interests array
+            // Handle interests array (store as JSON string for list.single_line_text_field)
             $interests = $request->get('interests');
             if ($interests && is_array($interests)) {
                 $fields[] = ['key' => 'interests', 'value' => json_encode($interests)];
@@ -681,5 +641,130 @@ MUTATION;
             \Illuminate\Support\Facades\Log::error("requestAccess Error: " . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    public function checkAccess(Request $request)
+    {
+        $shop = $request->get('shop');
+        $email = $request->get('email');
+        if (!$shop || !$email) {
+            return response()->json(['error' => 'Missing required parameter shop or email'], 400);
+        }
+
+        // 1. Security Check
+        $signatureError = $this->validateProxySignature($request);
+        if ($signatureError) {
+            return $signatureError;
+        }
+
+        // 2. Resolve Session
+        $session = \App\Services\ShopifyService::loadSession($shop);
+        if (!$session) {
+            return response()->json(['error' => 'Session not found for ' . $shop], 401);
+        }
+
+        try {
+            // 3. GraphQL Query to check customer
+            $graphQL = new Graphql($session->getShop(), $session->getAccessToken());
+            $query = <<<'QUERY'
+            query($q: String!) {
+              customers(first: 1, query: $q) {
+                edges {
+                  node {
+                    id
+                    tags
+                  }
+                }
+              }
+            }
+QUERY;
+
+            $response = $graphQL->query([
+                'query' => $query,
+                'variables' => ['q' => "email:" . strtolower(trim($email))]
+            ]);
+            $body = $response->getDecodedBody();
+
+            if (isset($body['errors'])) {
+                throw new \Exception(json_encode($body['errors']));
+            }
+
+            $customerNode = $body['data']['customers']['edges'][0]['node'] ?? null;
+
+            if ($customerNode) {
+                $tags = (array) ($customerNode['tags'] ?? []);
+                // Ensure tags is handled correctly (it can be a comma-separated string in some API versions/SDK return formats)
+                if (is_string($customerNode['tags'])) {
+                    $tags = array_map('trim', explode(',', $customerNode['tags']));
+                }
+
+                if (in_array('Approved', $tags, true)) {
+                    return response()->json([
+                        'status' => 'approved',
+                        'login_url' => '/account/login' // Standard Shopify login path
+                    ]);
+                }
+
+                return response()->json([
+                    'status' => 'denied',
+                    'redirect' => '/pages/request-access?status=pending'
+                ]);
+            }
+
+            return response()->json([
+                'status' => 'new',
+                'redirect' => '/pages/request-access'
+            ]);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error("checkAccess Error: " . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Reusable logic to validate Shopify App Proxy signature.
+     */
+    private function validateProxySignature(Request $request)
+    {
+        if (config('app.env') !== 'production') {
+            return null;
+        }
+
+        $queryParams = $request->query();
+        $signature = $queryParams['signature'] ?? '';
+        
+        if (empty($signature)) {
+            $shop = $request->get('shop', 'unknown');
+            \Illuminate\Support\Facades\Log::error("Signature validation: Missing signature for shop $shop");
+            return response()->json(['error' => 'Missing signature'], 401);
+        }
+
+        unset($queryParams['signature']);
+        ksort($queryParams);
+        
+        $messageParts = [];
+        foreach ($queryParams as $key => $value) {
+            if (is_array($value)) {
+                foreach ($value as $v) {
+                    $messageParts[] = "{$key}={$v}";
+                }
+            } else {
+                $messageParts[] = "{$key}={$value}";
+            }
+        }
+        sort($messageParts);
+        $message = implode('', $messageParts);
+        
+        $secret = env('SHOPIFY_API_SECRET');
+        $calculatedHmac = hash_hmac('sha256', $message, $secret);
+
+        if (!hash_equals($calculatedHmac, $signature)) {
+            $shop = $request->get('shop', 'unknown');
+            \Illuminate\Support\Facades\Log::error("Signature validation: HMAC mismatch for shop $shop. Message: '$message'. Calculated: $calculatedHmac, Received: $signature");
+            return response()->json(['error' => 'Invalid signature'], 401);
+        }
+
+        return null;
     }
 }

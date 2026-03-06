@@ -9,3 +9,4 @@ Homestead.yaml
 shopify.app.toml
 .phpunit.result.cache
 backend_prompt.md
+final_backend_prompt.md

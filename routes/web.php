@@ -55,6 +55,7 @@ $router->group(['prefix' => 'api'], function ($router) {
     $router->get('/get-discount', 'DiscountController@getDiscount');
 
     // Request Access
+    $router->get('/customers/check-access', 'CustomerController@checkAccess');
     $router->post('/customers/request-access', 'CustomerController@requestAccess');
 
     // Webhooks
