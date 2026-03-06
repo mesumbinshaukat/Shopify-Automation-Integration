@@ -241,7 +241,7 @@ class CustomerController extends Controller
         return response()->json($customer);
     }
 
-    public function sendCredentials(Request $request, $id)
+    public function sendCredentials($id, Request $request = null)
     {
         $customer = Customer::findOrFail($id);
         $password = \Illuminate\Support\Str::random(10);
@@ -250,7 +250,11 @@ class CustomerController extends Controller
             new \App\Mail\CustomerCredentialMail($customer, $password)
         );
 
-        return response()->json(['message' => 'Credentials sent to ' . $customer->email]);
+        if ($request) {
+            return response()->json(['message' => 'Credentials sent to ' . $customer->email]);
+        }
+        
+        return true;
     }
 
     public function saveDetails(Request $request)
@@ -539,5 +543,143 @@ MUTATION;
         }
 
         return response()->json($results);
+    }
+
+    public function requestAccess(Request $request)
+    {
+        $shop = $request->get('shop');
+        if (!$shop) {
+             return response()->json(['error' => 'Missing shop parameter'], 400);
+        }
+
+        // 1. Security Check: Verify Shopify App Proxy Signature
+        if (config('app.env') === 'production') {
+            $queryParams = $request->query();
+            $signature = $queryParams['signature'] ?? '';
+            
+            if (empty($signature)) {
+                return response()->json(['error' => 'Missing signature'], 401);
+            }
+
+            unset($queryParams['signature']);
+            ksort($queryParams);
+            
+            $messageParts = [];
+            foreach ($queryParams as $key => $value) {
+                if (is_array($value)) {
+                    foreach ($value as $v) {
+                        $messageParts[] = "{$key}={$v}";
+                    }
+                } else {
+                    $messageParts[] = "{$key}={$value}";
+                }
+            }
+            sort($messageParts);
+            $message = implode('', $messageParts);
+            
+            $calculatedHmac = hash_hmac('sha256', $message, env('SHOPIFY_API_SECRET'));
+
+            if (!hash_equals($calculatedHmac, $signature)) {
+                return response()->json(['error' => 'Invalid signature'], 401);
+            }
+        }
+
+        // 2. Validation
+        $this->validate($request, [
+            'practice_name' => 'required',
+            'first_name' => 'required',
+            'last_name' => 'required',
+            'email' => 'required|email',
+            'phone' => 'required',
+            'city' => 'required',
+            'state' => 'required',
+            'specialty' => 'required',
+            'interests' => 'nullable|array',
+            'message' => 'nullable',
+        ]);
+
+        $email = strtolower(trim($request->email));
+
+        // 3. Resolve Session
+        $session = \App\Services\ShopifyService::loadSession($shop);
+        if (!$session) {
+            return response()->json(['error' => 'Session issues. Please try again later.'], 401);
+        }
+
+        // 4. Edge Case: Check if email already exists in Shopify
+        try {
+            $existing = ShopifyCustomer::all($session, ['email' => $email]);
+            if (count($existing) > 0) {
+                return response()->json(['error' => 'This email is already registered as a customer.'], 422);
+            }
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning("requestAccess: Shopify customer check failed: " . $e->getMessage());
+        }
+
+        try {
+            // 5. Create Metaobject entry
+            $graphQL = new Graphql($session->getShop(), $session->getAccessToken());
+
+            $fields = [];
+            $data = $request->only([
+                'practice_name', 'first_name', 'last_name', 'title', 
+                'email', 'phone', 'city', 'state', 'specialty', 'message'
+            ]);
+            
+            // Add status
+            $data['status'] = 'pending';
+
+            foreach ($data as $key => $value) {
+                if ($value !== null) {
+                    $fields[] = ['key' => $key, 'value' => (string) $value];
+                }
+            }
+
+            // Handle interests array
+            $interests = $request->get('interests');
+            if ($interests && is_array($interests)) {
+                $fields[] = ['key' => 'interests', 'value' => json_encode($interests)];
+            }
+
+            $metaobjectMutation = <<<'MUTATION'
+            mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) {
+              metaobjectCreate(metaobject: $metaobject) {
+                metaobject {
+                  id
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+MUTATION;
+
+            $variables = [
+                'metaobject' => [
+                    'type' => 'access_request',
+                    'fields' => $fields
+                ]
+            ];
+
+            $response = $graphQL->query(['query' => $metaobjectMutation, 'variables' => $variables]);
+            $body = $response->getDecodedBody();
+
+            if (!empty($body['data']['metaobjectCreate']['userErrors'])) {
+                throw new \Exception("Metaobject Error: " . json_encode($body['data']['metaobjectCreate']['userErrors']));
+            }
+
+            // 6. Send Notification Email
+            $adminEmail = env('SALES_NOTIFICATION_EMAIL', 'sales@plymouthmedical.com');
+            \Illuminate\Support\Facades\Mail::to($adminEmail)->send(
+                new \App\Mail\AccessRequestMail($request->all())
+            );
+
+            return response()->json(['success' => true, 'message' => 'Your request has been submitted.']);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error("requestAccess Error: " . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
 }

@@ -54,6 +54,9 @@ $router->group(['prefix' => 'api'], function ($router) {
     // Discount Lookup (for storefront/liquid)
     $router->get('/get-discount', 'DiscountController@getDiscount');
 
+    // Request Access
+    $router->post('/customers/request-access', 'CustomerController@requestAccess');
+
     // Webhooks
     $router->post('/webhooks/customer-update', 'WebhookController@handleCustomerUpdate');
 });
