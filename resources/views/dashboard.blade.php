@@ -44,6 +44,7 @@
             const [customers, setCustomers] = useState([]);
             const [products, setProducts] = useState([]);
             const [collections, setCollections] = useState([]);
+            const [accessRequests, setAccessRequests] = useState([]);
             const [loading, setLoading] = useState(true);
             const [toasts, setToasts] = useState([]);
             
@@ -78,25 +79,28 @@
             const fetchAllData = async () => {
                 setLoading(true);
                 try {
-                    const [custRes, prodRes, collRes] = await Promise.all([
+                    const [custRes, prodRes, collRes, reqRes] = await Promise.all([
                         fetch('/api/customers'),
                         fetch('/api/products'),
-                        fetch('/api/collections')
+                        fetch('/api/collections'),
+                        fetch(`/api/access-requests?shop=${shop}`)
                     ]);
 
-                    if (!custRes.ok || !prodRes.ok || !collRes.ok) {
+                    if (!custRes.ok || !prodRes.ok || !collRes.ok || !reqRes.ok) {
                         throw new Error("One or more server requests failed (possibly a controller error).");
                     }
 
-                    const [custData, prodData, collData] = await Promise.all([
+                    const [custData, prodData, collData, reqData] = await Promise.all([
                         custRes.json(),
                         prodRes.json(),
-                        collRes.json()
+                        collRes.json(),
+                        reqRes.json()
                     ]);
 
                     setCustomers(custData);
                     setProducts(prodData);
                     setCollections(collData);
+                    setAccessRequests(reqData);
                 } catch (error) {
                     console.error(error);
                     showToast("Failed to fetch data: " + error.message, 'error');
@@ -185,6 +189,24 @@
                     const res = await handleRequest(`/api/${type}s/${id}?shop=${shop}`, 'DELETE');
                     if (res !== null) showToast(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted.`);
                     fetchAllData();
+                }
+            };
+
+            const handleApproveRequest = async (id) => {
+                const res = await handleRequest(`/api/access-requests/${id}/approve?shop=${shop}`, 'POST');
+                if (res) {
+                    showToast("Access request approved and customer created!");
+                    fetchAllData();
+                }
+            };
+
+            const handleDeleteRequest = async (id) => {
+                if(confirm("Are you sure you want to delete this access request?")) {
+                    const res = await handleRequest(`/api/access-requests/${id}?shop=${shop}`, 'DELETE');
+                    if (res) {
+                        showToast("Access request deleted.");
+                        fetchAllData();
+                    }
                 }
             };
 
@@ -312,7 +334,7 @@
 
                     {/* Tabs */}
                     <div className="flex border-b border-gray-200 mb-6">
-                        {['customers', 'products', 'collections'].map(tab => (
+                        {['customers', 'products', 'collections', 'requests'].map(tab => (
                             <button key={tab} onClick={() => setActiveTab(tab)} className={`px-6 py-3 text-sm font-medium capitalize transition-colors border-b-2 ${activeTab === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
                                 {tab}
                             </button>
@@ -507,8 +529,8 @@
                                                         <button onClick={() => openDiscountManager(customer)} className="text-gray-400 hover:text-indigo-600 font-bold uppercase tracking-wider transition">Add Discount</button>
                                                     )}
                                                 </td>
-                                                <td className="py-5 px-4 text-right space-x-4">
-                                                    <button onClick={() => handleSendCredentials(customer.id)} className="text-indigo-500 hover:text-indigo-700 text-xs font-bold uppercase">🔑 Invite</button>
+                                                <td className="py-5 px-4 text-right space-x-2">
+                                                    <button onClick={() => handleSendCredentials(customer.id)} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-[10px] font-bold uppercase transition">🔑 Invite</button>
                                                     <button onClick={async () => {
                                                         try {
                                                             const res = await fetch(`/api/customers/${customer.id}/details`);
@@ -526,9 +548,9 @@
                                                         } catch (err) {
                                                             showToast("Failed to fetch details: " + err.message, "error");
                                                         }
-                                                    }} className="text-blue-500 hover:text-blue-700 text-xs font-bold uppercase">📋 Info</button>
-                                                    <button onClick={() => { setIsEditingEntity('customer'); setEditingData(customer); }} className="text-gray-400 hover:text-indigo-600 text-xs font-bold uppercase">Edit</button>
-                                                    <button onClick={() => handleDeleteEntity('customer', customer.id)} className="text-gray-300 hover:text-red-500 text-xs font-bold uppercase transition">Delete</button>
+                                                    }} className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-md hover:bg-blue-100 text-[10px] font-bold uppercase transition">📋 Info</button>
+                                                    <button onClick={() => { setIsEditingEntity('customer'); setEditingData(customer); }} className="bg-gray-50 text-gray-600 px-3 py-1.5 rounded-md hover:bg-gray-100 text-[10px] font-bold uppercase transition">Edit</button>
+                                                    <button onClick={() => handleDeleteEntity('customer', customer.id)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-md hover:bg-red-100 text-[10px] font-bold uppercase transition">Delete</button>
                                                 </td>
                                             </tr>
                                         ))}
@@ -595,9 +617,9 @@
                                                 </td>
                                                 <td className="py-4 px-4 font-bold text-gray-800">{product.title}</td>
                                                 <td className="py-4 px-4 text-gray-500 text-sm font-medium">{product.handle}</td>
-                                                <td className="py-4 px-4 text-right space-x-3">
-                                                    <button onClick={() => { setIsEditingEntity('product'); setEditingData(product); }} className="text-indigo-600 hover:text-indigo-800 text-xs font-bold uppercase">Edit Name</button>
-                                                    <button onClick={() => handleDeleteEntity('product', product.id)} className="text-red-400 hover:text-red-600 text-xs font-bold uppercase">Delete</button>
+                                                <td className="py-4 px-4 text-right space-x-2">
+                                                    <button onClick={() => { setIsEditingEntity('product'); setEditingData(product); }} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-[10px] font-bold uppercase transition">Edit</button>
+                                                    <button onClick={() => handleDeleteEntity('product', product.id)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-md hover:bg-red-100 text-[10px] font-bold uppercase transition">Delete</button>
                                                 </td>
                                             </tr>
                                         ))}
@@ -623,9 +645,45 @@
                                             <tr key={collection.id} className="hover:bg-gray-50 transition">
                                                 <td className="py-5 px-4 font-bold text-gray-800">{collection.title}</td>
                                                 <td className="py-5 px-4 text-gray-500 text-sm font-medium">{collection.handle}</td>
-                                                <td className="py-5 px-4 text-right space-x-3">
-                                                    <button onClick={() => { setIsEditingEntity('collection'); setEditingData(collection); }} className="text-indigo-600 hover:text-indigo-800 text-xs font-bold uppercase">Edit</button>
-                                                    <button onClick={() => handleDeleteEntity('collection', collection.id)} className="text-red-400 hover:text-red-600 text-xs font-bold uppercase">Delete</button>
+                                                <td className="py-5 px-4 text-right space-x-2">
+                                                    <button onClick={() => { setIsEditingEntity('collection'); setEditingData(collection); }} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-[10px] font-bold uppercase transition">Edit</button>
+                                                    <button onClick={() => handleDeleteEntity('collection', collection.id)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-md hover:bg-red-100 text-[10px] font-bold uppercase transition">Delete</button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {!loading && activeTab === 'requests' && (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left">
+                                    <thead>
+                                        <tr className="text-gray-400 text-[10px] font-bold uppercase tracking-[0.1em] border-b">
+                                            <th className="pb-4 px-4">Contact</th>
+                                            <th className="pb-4 px-4">Email</th>
+                                            <th className="pb-4 px-4">Practice</th>
+                                            <th className="pb-4 px-4 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {accessRequests.length === 0 ? (
+                                            <tr><td colSpan="4" className="py-20 text-center text-gray-400 italic">No pending access requests.</td></tr>
+                                        ) : accessRequests.map(req => (
+                                            <tr key={req.id} className="hover:bg-indigo-50/30 transition-colors">
+                                                <td className="py-5 px-4">
+                                                    <div className="font-semibold text-gray-800">{req.first_name} {req.last_name}</div>
+                                                    <div className="text-[10px] text-gray-400 font-bold uppercase">{req.specialty}</div>
+                                                </td>
+                                                <td className="py-5 px-4 text-gray-500 text-sm font-medium">{req.email}</td>
+                                                <td className="py-5 px-4">
+                                                    <div className="text-sm font-medium text-gray-800">{req.practice_name}</div>
+                                                    <div className="text-[10px] text-gray-400">{req.city}, {req.state}</div>
+                                                </td>
+                                                <td className="py-5 px-4 text-right space-x-2">
+                                                    <button onClick={() => handleApproveRequest(req.id)} className="bg-green-600 text-white px-4 py-1.5 rounded-md hover:bg-green-700 text-[10px] font-bold uppercase transition shadow-sm">Approve</button>
+                                                    <button onClick={() => handleDeleteRequest(req.id)} className="bg-red-50 text-red-600 px-4 py-1.5 rounded-md hover:bg-red-100 text-[10px] font-bold uppercase transition">Delete</button>
                                                 </td>
                                             </tr>
                                         ))}

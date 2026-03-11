@@ -786,4 +786,147 @@ QUERY;
 
         return null;
     }
+
+    public function indexAccessRequests(Request $request)
+    {
+        $shop = $request->get('shop');
+        if (!$shop) return response()->json(['error' => 'Missing shop'], 400);
+
+        try {
+            $session = \App\Services\ShopifyService::loadSession($shop);
+            if (!$session) return response()->json(['error' => 'Session not found'], 401);
+
+            $gql = new Graphql($session->getShop(), $session->getAccessToken());
+            
+            $query = <<<GQL
+            {
+              metaobjects(type: "access_request", first: 100) {
+                edges {
+                  node {
+                    id
+                    handle
+                    updatedAt
+                    fields {
+                      key
+                      value
+                    }
+                  }
+                }
+              }
+            }
+            GQL;
+
+            $response = $gql->query(['query' => $query]);
+            $body = $response->getDecodedBody();
+
+            if (isset($body['errors'])) throw new \Exception(json_encode($body['errors']));
+
+            $requests = [];
+            foreach ($body['data']['metaobjects']['edges'] as $edge) {
+                $node = $edge['node'];
+                $requestData = ['id' => $node['id'], 'handle' => $node['handle'], 'updatedAt' => $node['updatedAt']];
+                foreach ($node['fields'] as $field) {
+                    $requestData[$field['key']] = $field['value'];
+                }
+                $requests[] = $requestData;
+            }
+
+            return response()->json($requests);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function approveAccessRequest(Request $request, $id)
+    {
+        $shop = $request->get('shop');
+        if (!$shop) return response()->json(['error' => 'Missing shop'], 400);
+
+        try {
+            $session = \App\Services\ShopifyService::loadSession($shop);
+            if (!$session) return response()->json(['error' => 'Session not found'], 401);
+
+            // 1. Fetch the metaobject to get details
+            $gql = new Graphql($session->getShop(), $session->getAccessToken());
+            $metaQuery = <<<GQL
+            query GetRequest(\$id: ID!) {
+              metaobject(id: \$id) {
+                fields {
+                  key
+                  value
+                }
+              }
+            }
+            GQL;
+
+            $metaRes = $gql->query(['query' => $metaQuery, 'variables' => ['id' => $id]]);
+            $metaBody = $metaRes->getDecodedBody();
+            $fields = [];
+            foreach ($metaBody['data']['metaobject']['fields'] as $f) {
+                $fields[$f['key']] = $f['value'];
+            }
+
+            // 2. Create customer in Shopify
+            $sCust = new ShopifyCustomer($session);
+            $sCust->first_name = $fields['first_name'] ?? '';
+            $sCust->last_name = $fields['last_name'] ?? '';
+            $sCust->email = $fields['email'] ?? '';
+            $sCust->tags = 'Approved';
+            $sCust->password = \Illuminate\Support\Str::random(12);
+            $sCust->password_confirmation = $sCust->password;
+            
+            if (!$sCust->save()) {
+                throw new \Exception("Failed to save customer to Shopify");
+            }
+
+            // 3. Delete the metaobject
+            $deleteMutation = <<<GQL
+            mutation metaobjectDelete(\$id: ID!) {
+              metaobjectDelete(id: \$id) {
+                deletedId
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+            GQL;
+
+            $gql->query(['query' => $deleteMutation, 'variables' => ['id' => $id]]);
+
+            return response()->json(['success' => true]);
+
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function deleteAccessRequest(Request $request, $id)
+    {
+        $shop = $request->get('shop');
+        if (!$shop) return response()->json(['error' => 'Missing shop'], 400);
+
+        try {
+            $session = \App\Services\ShopifyService::loadSession($shop);
+            if (!$session) return response()->json(['error' => 'Session not found'], 401);
+
+            $gql = new Graphql($session->getShop(), $session->getAccessToken());
+            $deleteMutation = <<<GQL
+            mutation metaobjectDelete(\$id: ID!) {
+              metaobjectDelete(id: \$id) {
+                deletedId
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+            GQL;
+
+            $res = $gql->query(['query' => $deleteMutation, 'variables' => ['id' => $id]]);
+            return response()->json(['success' => true]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
 }
