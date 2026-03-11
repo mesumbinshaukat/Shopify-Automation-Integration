@@ -38,6 +38,7 @@ class CustomerController extends Controller
             $sCust->first_name = $request->first_name;
             $sCust->last_name = $request->last_name;
             $sCust->email = strtolower(trim($request->email));
+            $sCust->tags = 'Approved';
             $sCust->password = $request->password ?? \Illuminate\Support\Str::random(10);
             $sCust->password_confirmation = $sCust->password;
             
@@ -228,8 +229,21 @@ class CustomerController extends Controller
                 if ($discountData) {
                     $customer->shopify_discount_id = $discountData['discount_id'] ?? $discountData['price_rule_id'];
                     if (isset($discountData['tags'])) {
-                        $customer->shopify_tags = $discountData['tags'];
+                        $tags = array_map('trim', explode(',', $discountData['tags']));
+                        if (!in_array('Approved', $tags)) {
+                            $tags[] = 'Approved';
+                        }
+                        $customer->shopify_tags = implode(', ', $tags);
+                    } else {
+                        $customer->shopify_tags = 'Approved';
                     }
+
+                    // Update Shopify tags via REST to be sure
+                    $sUpdate = new ShopifyCustomer($session);
+                    $sUpdate->id = $customer->shopify_id;
+                    $sUpdate->tags = $customer->shopify_tags;
+                    $sUpdate->save();
+
                     $customer->save();
                 }
             } catch (\Exception $e) {
@@ -635,11 +649,13 @@ MUTATION;
                 new \App\Mail\AccessRequestMail($request->all())
             );
 
-            return response()->json(['success' => true, 'message' => 'Your request has been submitted.']);
+            return response()->json(['success' => true, 'message' => 'Your request has been submitted.'])
+                ->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
 
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::error("requestAccess Error: " . $e->getMessage());
-            return response()->json(['error' => $e->getMessage()], 500);
+            return response()->json(['error' => $e->getMessage()], 500)
+                ->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
         }
     }
 
@@ -648,7 +664,8 @@ MUTATION;
         $shop = $request->get('shop');
         $email = $request->get('email');
         if (!$shop || !$email) {
-            return response()->json(['error' => 'Missing required parameter shop or email'], 400);
+            return response()->json(['error' => 'Missing required parameter shop or email'], 400)
+                ->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
         }
 
         // 1. Security Check
@@ -660,7 +677,8 @@ MUTATION;
         // 2. Resolve Session
         $session = \App\Services\ShopifyService::loadSession($shop);
         if (!$session) {
-            return response()->json(['error' => 'Session not found for ' . $shop], 401);
+            return response()->json(['error' => 'Session not found for ' . $shop], 401)
+                ->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
         }
 
         try {
@@ -702,23 +720,24 @@ QUERY;
                     return response()->json([
                         'status' => 'approved',
                         'login_url' => '/account/login' // Standard Shopify login path
-                    ]);
+                    ])->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
                 }
 
                 return response()->json([
                     'status' => 'denied',
                     'redirect' => '/pages/request-access?status=pending'
-                ]);
+                ])->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
             }
 
             return response()->json([
                 'status' => 'new',
                 'redirect' => '/pages/request-access'
-            ]);
+            ])->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
 
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::error("checkAccess Error: " . $e->getMessage());
-            return response()->json(['error' => $e->getMessage()], 500);
+            return response()->json(['error' => $e->getMessage()], 500)
+                ->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
         }
     }
 

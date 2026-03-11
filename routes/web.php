@@ -21,6 +21,10 @@ $router->get('/dashboard', ['as' => 'dashboard', 'uses' => 'ShopifyController@da
 
 // API Routes
 $router->group(['prefix' => 'api'], function ($router) {
+    // Request Access (Specific routes first to avoid wildcard shadowing)
+    $router->get('/customers/check-access', 'CustomerController@checkAccess');
+    $router->post('/customers/request-access', 'CustomerController@requestAccess');
+
     // Customers
     $router->group(['prefix' => 'customers'], function ($router) {
         $router->get('/', 'CustomerController@index');
@@ -53,10 +57,6 @@ $router->group(['prefix' => 'api'], function ($router) {
 
     // Discount Lookup (for storefront/liquid)
     $router->get('/get-discount', 'DiscountController@getDiscount');
-
-    // Request Access
-    $router->get('/customers/check-access', 'CustomerController@checkAccess');
-    $router->post('/customers/request-access', 'CustomerController@requestAccess');
 
     // Webhooks
     $router->post('/webhooks/customer-update', 'WebhookController@handleCustomerUpdate');
