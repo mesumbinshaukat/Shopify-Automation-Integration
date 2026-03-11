@@ -74,7 +74,8 @@ class CustomerController extends Controller
             );
 
             return response()->json($customer, 201);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("store Error: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json(['error' => 'Creation Issue: ' . $e->getMessage()], 500);
         }
     }
@@ -113,8 +114,8 @@ class CustomerController extends Controller
                     $sCust->email = $customer->email;
                     $sCust->save();
                 }
-            } catch (\Exception $e) {
-                \Illuminate\Support\Facades\Log::error('Shopify Customer Update failed: ' . $e->getMessage());
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('Shopify Customer Update failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             }
         }
 
@@ -143,8 +144,8 @@ class CustomerController extends Controller
                 if ($customer->shopify_id && $customer->shopify_id != 0) {
                     ShopifyCustomer::delete($session, $customer->shopify_id);
                 }
-            } catch (\Exception $e) {
-                \Illuminate\Support\Facades\Log::error('Shopify Customer Delete failed: ' . $e->getMessage());
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('Shopify Customer Delete failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             }
         }
 
@@ -180,8 +181,8 @@ class CustomerController extends Controller
             }
 
             return response()->json(['message' => 'Customer sync completed', 'count' => count($customers)]);
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('Sync error for ' . $shop . ': ' . $e->getMessage());
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Sync error for ' . $shop . ': ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json(['error' => 'Sync failed: ' . $e->getMessage()], 500);
         }
     }
@@ -246,8 +247,8 @@ class CustomerController extends Controller
 
                     $customer->save();
                 }
-            } catch (\Exception $e) {
-                \Illuminate\Support\Facades\Log::error('Failed to update Shopify discount for customer ' . $customer->email . ': ' . $e->getMessage());
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to update Shopify discount for customer ' . $customer->email . ': ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
                 return response()->json(['error' => $e->getMessage()], 500);
             }
         }
@@ -420,8 +421,8 @@ MUTATION;
 
             return response()->json(['success' => true]);
 
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error("saveDetails Error: " . $e->getMessage());
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("saveDetails Error: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
@@ -519,10 +520,11 @@ MUTATION;
                 );
 
                 $results['success']++;
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 // If the error is a duplicate entry for empty string, it's already handled by using null
                 // But generally, the user wants us to be more lenient with "success" reporting.
                 // However, we'll keep real errors in failed count.
+                \Illuminate\Support\Facades\Log::error("import Row " . ($index + 1) . " Error: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
                 $results['failed']++;
                 $results['errors'][] = "Row " . ($index + 1) . ": " . $e->getMessage();
             }
@@ -549,6 +551,7 @@ MUTATION;
             'practice_name' => 'required',
             'first_name' => 'required',
             'last_name' => 'required',
+            'title' => 'required',
             'email' => 'required|email',
             'phone' => 'required',
             'city' => 'required',
@@ -586,8 +589,8 @@ QUERY;
             if (!empty($searchBody['data']['customers']['edges'])) {
                 return response()->json(['error' => 'This email is already registered as a customer.'], 422);
             }
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning("requestAccess: Shopify customer GraphQL check failed: " . $e->getMessage());
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("requestAccess: Shopify customer GraphQL check failed: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
         }
 
         try {
@@ -652,8 +655,8 @@ MUTATION;
             return response()->json(['success' => true, 'message' => 'Your request has been submitted.'])
                 ->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
 
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error("requestAccess Error: " . $e->getMessage());
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("requestAccess Error: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json(['error' => $e->getMessage()], 500)
                 ->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
         }
@@ -734,8 +737,8 @@ QUERY;
                 'redirect' => '/pages/request-access'
             ])->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
 
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error("checkAccess Error: " . $e->getMessage());
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("checkAccess Error: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json(['error' => $e->getMessage()], 500)
                 ->header('Access-Control-Allow-Origin', 'https://plymouthmedical.myshopify.com');
         }
@@ -833,8 +836,8 @@ QUERY;
 
             \Illuminate\Support\Facades\Log::info("CustomerController@indexAccessRequests: Returning " . count($requests) . " requests.");
             return response()->json($requests);
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error("indexAccessRequests Error: " . $e->getMessage());
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("indexAccessRequests Error: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
@@ -903,7 +906,8 @@ QUERY;
 
             return response()->json(['success' => true]);
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("approveAccessRequest Error: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
@@ -932,7 +936,8 @@ QUERY;
 
             $res = $gql->query(['query' => $deleteMutation, 'variables' => ['id' => $id]]);
             return response()->json(['success' => true]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("deleteAccessRequest Error: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
