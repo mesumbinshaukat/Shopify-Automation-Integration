@@ -614,7 +614,7 @@ QUERY;
 
             // Handle interests array (store as JSON string for list.single_line_text_field)
             $interests = $request->get('interests');
-            if ($interests && is_array($interests)) {
+            if ($interests && is_array($interests) && count($interests) > 0) {
                 $fields[] = ['key' => 'interests', 'value' => json_encode($interests)];
             }
 
