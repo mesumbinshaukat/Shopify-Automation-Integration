@@ -831,8 +831,10 @@ QUERY;
                 $requests[] = $requestData;
             }
 
+            \Illuminate\Support\Facades\Log::info("CustomerController@indexAccessRequests: Returning " . count($requests) . " requests.");
             return response()->json($requests);
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error("indexAccessRequests Error: " . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
@@ -861,6 +863,11 @@ QUERY;
 
             $metaRes = $gql->query(['query' => $metaQuery, 'variables' => ['id' => $id]]);
             $metaBody = $metaRes->getDecodedBody();
+            
+            if (!isset($metaBody['data']['metaobject']) || !$metaBody['data']['metaobject']) {
+                throw new \Exception("Request not found for ID: $id");
+            }
+
             $fields = [];
             foreach ($metaBody['data']['metaobject']['fields'] as $f) {
                 $fields[$f['key']] = $f['value'];

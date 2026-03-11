@@ -60,7 +60,8 @@ $router->group(['prefix' => 'api'], function ($router) {
 
     // Webhooks
     $router->post('/webhooks/customer-update', 'WebhookController@handleCustomerUpdate');
-    Route::get('/api/access-requests', [CustomerController::class, 'indexAccessRequests']);
-    Route::post('/api/access-requests/{id}/approve', [CustomerController::class, 'approveAccessRequest']);
-    Route::delete('/api/access-requests/{id}', [CustomerController::class, 'deleteAccessRequest']);
+    // Access Requests
+    $router->get('/access-requests', 'CustomerController@indexAccessRequests');
+    $router->post('/access-requests/{id}/approve', 'CustomerController@approveAccessRequest');
+    $router->delete('/access-requests/{id}', 'CustomerController@deleteAccessRequest');
 });

@@ -530,7 +530,7 @@
                                                     )}
                                                 </td>
                                                 <td className="py-5 px-4 text-right space-x-2">
-                                                    <button onClick={() => handleSendCredentials(customer.id)} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-[10px] font-bold uppercase transition">🔑 Invite</button>
+                                                    <button onClick={() => handleSendCredentials(customer.id)} className="bg-indigo-600 text-white px-3 py-1.5 rounded-md hover:bg-indigo-700 text-[10px] font-bold uppercase transition shadow-sm">🔑 Invite</button>
                                                     <button onClick={async () => {
                                                         try {
                                                             const res = await fetch(`/api/customers/${customer.id}/details`);
@@ -548,9 +548,9 @@
                                                         } catch (err) {
                                                             showToast("Failed to fetch details: " + err.message, "error");
                                                         }
-                                                    }} className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-md hover:bg-blue-100 text-[10px] font-bold uppercase transition">📋 Info</button>
-                                                    <button onClick={() => { setIsEditingEntity('customer'); setEditingData(customer); }} className="bg-gray-50 text-gray-600 px-3 py-1.5 rounded-md hover:bg-gray-100 text-[10px] font-bold uppercase transition">Edit</button>
-                                                    <button onClick={() => handleDeleteEntity('customer', customer.id)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-md hover:bg-red-100 text-[10px] font-bold uppercase transition">Delete</button>
+                                                    }} className="bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 text-[10px] font-bold uppercase transition shadow-sm">📋 Info</button>
+                                                    <button onClick={() => { setIsEditingEntity('customer'); setEditingData(customer); }} className="bg-gray-600 text-white px-3 py-1.5 rounded-md hover:bg-gray-700 text-[10px] font-bold uppercase transition shadow-sm">Edit</button>
+                                                    <button onClick={() => handleDeleteEntity('customer', customer.id)} className="bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700 text-[10px] font-bold uppercase transition shadow-sm">Delete</button>
                                                 </td>
                                             </tr>
                                         ))}
@@ -618,8 +618,8 @@
                                                 <td className="py-4 px-4 font-bold text-gray-800">{product.title}</td>
                                                 <td className="py-4 px-4 text-gray-500 text-sm font-medium">{product.handle}</td>
                                                 <td className="py-4 px-4 text-right space-x-2">
-                                                    <button onClick={() => { setIsEditingEntity('product'); setEditingData(product); }} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-[10px] font-bold uppercase transition">Edit</button>
-                                                    <button onClick={() => handleDeleteEntity('product', product.id)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-md hover:bg-red-100 text-[10px] font-bold uppercase transition">Delete</button>
+                                                    <button onClick={() => { setIsEditingEntity('product'); setEditingData(product); }} className="bg-indigo-600 text-white px-3 py-1.5 rounded-md hover:bg-indigo-700 text-[10px] font-bold uppercase transition shadow-sm">Edit</button>
+                                                    <button onClick={() => handleDeleteEntity('product', product.id)} className="bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700 text-[10px] font-bold uppercase transition shadow-sm">Delete</button>
                                                 </td>
                                             </tr>
                                         ))}
@@ -646,8 +646,8 @@
                                                 <td className="py-5 px-4 font-bold text-gray-800">{collection.title}</td>
                                                 <td className="py-5 px-4 text-gray-500 text-sm font-medium">{collection.handle}</td>
                                                 <td className="py-5 px-4 text-right space-x-2">
-                                                    <button onClick={() => { setIsEditingEntity('collection'); setEditingData(collection); }} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-[10px] font-bold uppercase transition">Edit</button>
-                                                    <button onClick={() => handleDeleteEntity('collection', collection.id)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-md hover:bg-red-100 text-[10px] font-bold uppercase transition">Delete</button>
+                                                    <button onClick={() => { setIsEditingEntity('collection'); setEditingData(collection); }} className="bg-indigo-600 text-white px-3 py-1.5 rounded-md hover:bg-indigo-700 text-[10px] font-bold uppercase transition shadow-sm">Edit</button>
+                                                    <button onClick={() => handleDeleteEntity('collection', collection.id)} className="bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700 text-[10px] font-bold uppercase transition shadow-sm">Delete</button>
                                                 </td>
                                             </tr>
                                         ))}
@@ -683,7 +683,7 @@
                                                 </td>
                                                 <td className="py-5 px-4 text-right space-x-2">
                                                     <button onClick={() => handleApproveRequest(req.id)} className="bg-green-600 text-white px-4 py-1.5 rounded-md hover:bg-green-700 text-[10px] font-bold uppercase transition shadow-sm">Approve</button>
-                                                    <button onClick={() => handleDeleteRequest(req.id)} className="bg-red-50 text-red-600 px-4 py-1.5 rounded-md hover:bg-red-100 text-[10px] font-bold uppercase transition">Delete</button>
+                                                    <button onClick={() => handleDeleteRequest(req.id)} className="bg-red-600 text-white px-4 py-1.5 rounded-md hover:bg-red-700 text-[10px] font-bold uppercase transition shadow-sm">Delete</button>
                                                 </td>
                                             </tr>
                                         ))}
